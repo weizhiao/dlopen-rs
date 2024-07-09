@@ -8,8 +8,14 @@ mod relocation;
 mod segment;
 mod unwind;
 
+pub use loader::ELFLibrary;
+
 // 因为unlikely只能在nightly版本的编译器中使用
+#[cfg(not(feature = "nightly"))]
 use core::convert::identity as unlikely;
+#[cfg(feature = "nightly")]
+use core::intrinsics::unlikely;
+
 use elf::file::Class;
 
 extern crate alloc;
@@ -100,6 +106,9 @@ pub enum Error {
     #[snafu(display("Can't parse file, {msg}"))]
     LoaderError {
         msg: &'static str,
+    },
+    RelocateError {
+        msg: String,
     },
     #[snafu(display("Unknown Error"))]
     Unknown,

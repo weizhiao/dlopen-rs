@@ -1,3 +1,5 @@
+use std::slice::Iter;
+
 use crate::{segment::ELFSegments, Dyn, Phdr};
 
 pub(crate) struct ELFDynamic {
@@ -16,12 +18,8 @@ impl ELFDynamic {
         };
         ELFDynamic { dynamic }
     }
-}
 
-impl Iterator for ELFDynamic {
-    type Item = &'static Dyn;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.dynamic.iter().next()
+    pub(crate) fn iter(&self) -> Iter<'_, Dyn> {
+        self.dynamic.iter()
     }
 }

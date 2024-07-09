@@ -1,0 +1,12 @@
+[package]
+name = "example_dylib"
+version = "0.2.0"
+authors = ["Szymon Wieloch <szymon.wieloch@gmail.com>",
+           "OpenByte <development.openbyte@gmail.com>"]
+description = "Example dynamic link library for executing tests of libraries that load and operate on dynamic link libraries"
+license = "MIT"
+edition = "2021"
+
+[lib]
+name = "example"
+crate-type = ["cdylib"]

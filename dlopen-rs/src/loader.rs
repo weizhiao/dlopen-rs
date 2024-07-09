@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::{
     dynamic::ELFDynamic,
     elfloader_error,
@@ -7,13 +9,9 @@ use crate::{
     segment::ELFSegments,
     unlikely,
     unwind::UnwindInfo,
-    Dyn, Error, Rela, Result, Symbol, BUF_SIZE, EHDR_SIZE, E_CLASS, MASK, PAGE_SIZE,
+    Rela, Result, Symbol, MASK, PAGE_SIZE,
 };
-use elf::{
-    abi::*,
-    endian::NativeEndian,
-    file::{parse_ident, Class, FileHeader},
-};
+use elf::abi::*;
 
 #[derive(Debug)]
 #[allow(unused)]
@@ -21,17 +19,17 @@ pub struct ELFLibrary {
     //.gnu.hash
     hashtab: ELFGnuHash,
     //.dynsym
-    symtab: *const Symbol,
+    pub(crate) symtab: *const Symbol,
     //.dynstr
-    strtab: elf::string_table::StringTable<'static>,
+    pub(crate) strtab: elf::string_table::StringTable<'static>,
     // 保存unwind信息,UnwindInfo一定要先于ELFMemory drop,
     // 因为__deregister_frame注销时会使用elf文件中eh_frame的地址
     // 一旦memory被销毁了，访问该地址就会发生段错误
     unwind_info: UnwindInfo,
     //elflibrary在内存中的映射
-    segments: ELFSegments,
-    relro: Option<ELFRelro>,
-    rela_sections: ELFRelas,
+    pub(crate) segments: ELFSegments,
+    pub(crate) relro: Option<ELFRelro>,
+    pub(crate) rela_sections: ELFRelas,
 }
 
 impl ELFLibrary {
@@ -54,71 +52,17 @@ impl ELFLibrary {
         None
     }
 
-    // #[inline]
-    // fn relocate(&self, rela_sections: ELFRelas, relro: Option<ELFRelro>) -> Result<()> {
-    //     let pltrel = rela_sections.pltrel;
-    //     for rela in pltrel {
-    //         let r_type = rela.r_info as usize & REL_MASK;
-    //         let r_sym = rela.r_info as usize >> REL_BIT;
-    //         let dynsym = unsafe { self.symtab.add(r_sym).read() };
-    //         let name = self
-    //             .strtab
-    //             .get(dynsym.st_name as usize)
-    //             .map_err(err_convert)?;
+    pub fn from_file(path: &Path) -> Result<ELFLibrary> {
+        let file = ELFFile::from_file(path)?;
+        Self::load_library(file)
+    }
 
+	pub fn from_binary(bytes:&[u8])->Result<ELFLibrary>{
+		let file = ELFFile::from_binary(bytes);
+        Self::load_library(file)
+	}
 
-    //         let symbol = None;
-
-    //         #[cold]
-    //         #[inline(never)]
-    //         fn relocate_error(name: &str) -> Result<()> {
-    //             Err(Box::new(ELFLoaderError {
-    //                 msg: format!("can not relocate symbol {}", name),
-    //             }))
-    //         }
-
-    //         let symbol = symbol.or(BUILTINS_SYMBOL_MAP.get(name));
-    //         let symbol = match symbol {
-    //             Some(sym) => sym,
-    //             None => {
-    //                 return relocate_error(name);
-    //             }
-    //         };
-
-    //         let rel_addr = unsafe {
-    //             self.segments
-    //                 .as_mut_ptr()
-    //                 .add(rela.r_offset as usize - self.segments.addr_min())
-    //                 as *mut usize
-    //         };
-
-    //         #[cfg(target_arch = "x86_64")]
-    //         const REL_JUMP_SLOT: u32 = R_X86_64_JUMP_SLOT;
-    //         #[cfg(target_arch = "x86")]
-    //         const REL_JUMP_SLOT: u32 = R_X86_64_JUMP_SLOT;
-    //         #[cfg(target_arch = "aarch64")]
-    //         const REL_JUMP_SLOT: u32 = R_AARCH64_JUMP_SLOT;
-    //         #[cfg(target_arch = "arm")]
-    //         const REL_JUMP_SLOT: u32 = R_ARM_JUMP_SLOT;
-    //         #[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
-    //         const REL_JUMP_SLOT: u32 = R_RISCV_JUMP_SLOT;
-
-    //         match r_type as _ {
-    //             REL_JUMP_SLOT => unsafe { rel_addr.write(*symbol as _) },
-    //             _ => {
-    //                 return elfloader_error("unsupport rela type");
-    //             }
-    //         }
-    //     }
-
-    //     if let Some(relro) = relro {
-    //         relro.relro()?;
-    //     }
-
-    //     Ok(())
-    // }
-
-    pub fn load_library(mut file: ELFFile) -> Result<ELFLibrary> {
+    pub(crate) fn load_library(mut file: ELFFile) -> Result<ELFLibrary> {
         //通常来说ehdr的后面就是phdrs，因此这里假设ehdr后面就是phdrs，会多读8个phdr的大小，若符合假设则可以减少一次系统调用
         #[cfg(feature = "std")]
         let mut buf = Buf::new();
@@ -210,7 +154,7 @@ impl ELFLibrary {
         let mut pltrel_off = usize::MAX;
         let mut is_rel = true;
 
-        for dynamic in dynamics {
+        for dynamic in dynamics.iter() {
             match dynamic.d_tag {
                 DT_GNU_HASH => hash_off = dynamic.d_un as usize,
                 DT_SYMTAB => symtab_off = dynamic.d_un as usize,

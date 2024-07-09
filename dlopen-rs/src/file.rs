@@ -1,6 +1,6 @@
 use std::{mem::MaybeUninit, path::Path};
 
-use crate::{dynamic::ELFDynamic, ehdr::ELFEhdr, Phdr, Result, BUF_SIZE};
+use crate::{ehdr::ELFEhdr, Phdr, Result, BUF_SIZE};
 use snafu::ResultExt;
 
 pub(crate) enum FileType {
@@ -79,7 +79,7 @@ impl ELFFile {
                 let stack_buf = buf.stack();
                 file.read_exact(stack_buf).context(IOSnafu)?;
                 let ehdr = ELFEhdr::new(&stack_buf)?;
-                ehdr.validate();
+                ehdr.validate()?;
 
                 //获取phdrs
                 let phdrs_num = ehdr.e_phnum();
@@ -103,7 +103,7 @@ impl ELFFile {
             }
             FileType::Binary(file) => {
                 let ehdr = ELFEhdr::new(*file)?;
-                ehdr.validate();
+                ehdr.validate()?;
 
                 let phdrs_num = ehdr.e_phnum();
                 let (phdr_start, _) = ehdr.phdr_range();

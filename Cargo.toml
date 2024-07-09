@@ -1,40 +1,5 @@
-[package]
-name = "dlopen-rs"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies.unwinding]
-version = "0.2.1"
-default-features = false
-features = ["hide-trace", "dwarf-expr", "fde-custom", "panic", "unwinder"]
-optional = true
-
-[dependencies.gimli]
-version = "0.30"
-default-features = false
-features = ["read-core"]
-
-[dependencies.hashbrown]
-version = '0.14'
-default-features = false
-features = ['ahash', 'inline-more']
-
-[dependencies.snafu]
-version = '0.8'
-default-features = false
-features = ['rust_1_61', 'unstable-core-error']
-
-[dependencies.nix]
-version = '0.29'
-default-features = false
-features = ['mman', 'signal']
-optional = true
-
-[dependencies]
-elf = { version = "0.7.4", default-features = false }
-
-[features]
-default = ["std", "mmap"]
-std = []
-mmap = ["dep:nix"]
-nightly = []
+[workspace]
+resolver = "2"
+members = [
+	'dlopen-rs', "example-dylib",
+]
