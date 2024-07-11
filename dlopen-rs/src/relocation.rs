@@ -70,7 +70,7 @@ impl GetSymbol for ELFLibrary {
 
 impl ELFLibrary {
     // FIXME:dyn may cause performance degradation
-    pub fn relocate(&self, libs: &[&dyn GetSymbol]) -> Result<()> {
+    pub fn relocate_with(&self, libs: &[&dyn GetSymbol]) -> Result<()> {
         const REL_RELATIVE: u32 = R_X86_64_RELATIVE;
         const REL_GOT: u32 = R_X86_64_GLOB_DAT;
 

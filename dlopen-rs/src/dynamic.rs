@@ -8,6 +8,7 @@ pub(crate) struct ELFDynamic {
     init_fn: Option<extern "C" fn()>,
     init_array_fn: Option<&'static [extern "C" fn()]>,
     fini_fn: Option<extern "C" fn()>,
+    fini_array_fn: Option<&'static [extern "C" fn()]>,
     pltrel: Option<&'static [Rela]>,
     rela: Option<&'static [Rela]>,
 }
@@ -37,6 +38,8 @@ impl ELFDynamic {
         let mut fini_off = None;
         let mut init_array_off = None;
         let mut init_array_size = None;
+        let mut fini_array_off = None;
+        let mut fini_array_size = None;
 
         for dynamic in dynamics {
             match dynamic.d_tag {
@@ -52,6 +55,8 @@ impl ELFDynamic {
                 DT_FINI => fini_off = Some(dynamic.d_un as usize),
                 DT_INIT_ARRAY => init_array_off = Some(dynamic.d_un as usize),
                 DT_INIT_ARRAYSZ => init_array_size = Some(dynamic.d_un as usize),
+                DT_FINI_ARRAY => fini_array_off = Some(dynamic.d_un as usize),
+                DT_FINI_ARRAYSZ => fini_array_size = Some(dynamic.d_un as usize),
                 _ => {}
             }
         }
@@ -115,6 +120,19 @@ impl ELFDynamic {
                 None
             };
 
+        let fini_array_fn: Option<&'static [extern "C" fn()]> =
+            if let Some(fini_array_off) = fini_array_off {
+                let ptr = fini_array_off + base;
+                unsafe {
+                    Some(core::slice::from_raw_parts(
+                        ptr as _,
+                        fini_array_size.unwrap() / core::mem::size_of::<usize>(),
+                    ))
+                }
+            } else {
+                None
+            };
+
         let fini_fn: Option<extern "C" fn()> = if let Some(fini_off) = fini_off {
             unsafe { core::mem::transmute(fini_off + base) }
         } else {
@@ -128,6 +146,7 @@ impl ELFDynamic {
             init_fn,
             init_array_fn,
             fini_fn,
+            fini_array_fn,
             pltrel,
             rela,
         })
@@ -163,5 +182,9 @@ impl ELFDynamic {
 
     pub(crate) fn fini_fn(&self) -> Option<extern "C" fn()> {
         self.fini_fn
+    }
+
+    pub(crate) fn fini_array_fn(&self) -> Option<&'static [extern "C" fn()]> {
+        self.fini_array_fn
     }
 }

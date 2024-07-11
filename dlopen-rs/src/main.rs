@@ -28,7 +28,7 @@ fn main() {
 	hash_map.insert("_ITM_deregisterTMCloneTable".to_owned(), 0 as *const ());
 	hash_map.insert("__gmon_start__".to_owned(), 0 as *const ());
     let dump = Dump { hash_map };
-    lib.relocate(&[&dump]).unwrap();
+    lib.relocate_with(&[&dump]).unwrap();
     lib.do_init();
     let add = lib.get_sym("add").unwrap();
     let add: extern "C" fn(i32, i32) -> i32 = unsafe { core::mem::transmute(add) };

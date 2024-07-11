@@ -30,10 +30,24 @@ pub struct ELFLibrary {
     pub(crate) rela_sections: ELFRelas,
     init_fn: Option<extern "C" fn()>,
     init_array_fn: Option<&'static [extern "C" fn()]>,
+    fini_fn: Option<extern "C" fn()>,
+    fini_array_fn: Option<&'static [extern "C" fn()]>,
+}
+
+impl Drop for ELFLibrary {
+    fn drop(&mut self) {
+        if let Some(fini) = self.fini_fn {
+            fini();
+        }
+        if let Some(fini_array) = self.fini_array_fn {
+            for fini in fini_array {
+                fini();
+            }
+        }
+    }
 }
 
 impl ELFLibrary {
-
     pub fn from_file(path: &Path) -> Result<ELFLibrary> {
         let file = ELFFile::from_file(path)?;
         Self::load_library(file)
@@ -145,6 +159,8 @@ impl ELFLibrary {
             rela_sections,
             init_fn: dynamics.init_fn(),
             init_array_fn: dynamics.init_array_fn(),
+            fini_fn: dynamics.fini_fn(),
+            fini_array_fn: dynamics.fini_array_fn(),
         };
         Ok(elf_lib)
     }
