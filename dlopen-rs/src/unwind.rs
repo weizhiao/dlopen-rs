@@ -76,9 +76,8 @@ impl Drop for UnwindInfo {
 
 impl UnwindInfo {
     pub(crate) fn new(phdr: &Phdr, segments: &ELFSegments) -> Result<UnwindInfo> {
-        let addr_min = segments.addr_min();
         let base = segments.base();
-        let eh_frame_hdr_off = phdr.p_vaddr as usize - addr_min;
+        let eh_frame_hdr_off = phdr.p_vaddr as usize;
         let eh_frame_hdr_size = phdr.p_memsz as usize;
         let bases =
             gimli::BaseAddresses::default().set_eh_frame_hdr((eh_frame_hdr_off + base) as _);

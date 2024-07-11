@@ -2,13 +2,15 @@
 mod dynamic;
 mod ehdr;
 mod file;
-mod gnuhash;
+mod hash;
 mod loader;
 mod relocation;
 mod segment;
 mod unwind;
+mod builtin;
 
 pub use loader::ELFLibrary;
+pub use relocation::GetSymbol;
 
 // 因为unlikely只能在nightly版本的编译器中使用
 #[cfg(not(feature = "nightly"))]

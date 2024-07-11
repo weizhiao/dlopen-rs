@@ -32,24 +32,27 @@ impl Drop for ELFSegments {
 }
 
 impl ELFSegments {
+    /// base = memory_addr - addr_min
     #[inline]
     pub(crate) fn base(&self) -> usize {
-        (self.memory.as_ptr()) as usize
+        (self.memory.as_ptr()) as usize - self.addr_min
     }
 
-    #[inline]
-    pub(crate) fn addr_min(&self) -> usize {
-        self.addr_min
-    }
-
+    /// start = memory_addr - addr_min
     #[inline]
     pub(crate) fn as_mut_ptr(&self) -> *mut u8 {
-        self.memory.as_ptr() as *mut u8
+        unsafe { self.memory.as_ptr().cast::<u8>().sub(self.addr_min) }
     }
 
+    /// start = memory_addr - addr_min
     #[inline]
     pub(crate) fn as_mut_slice(&self) -> &'static mut [u8] {
-        unsafe { core::slice::from_raw_parts_mut(self.memory.as_ptr() as _, self.len) }
+        unsafe {
+            core::slice::from_raw_parts_mut(
+                self.memory.as_ptr().cast::<u8>().sub(self.addr_min),
+                self.len,
+            )
+        }
     }
 
     #[cfg(feature = "unwinding")]

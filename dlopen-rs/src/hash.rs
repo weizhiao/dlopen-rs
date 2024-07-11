@@ -2,7 +2,29 @@ use crate::{unlikely, Symbol};
 use elf::string_table::StringTable;
 
 #[derive(Debug)]
-pub(crate) struct ELFGnuHash {
+pub(crate) enum ELFHashTable {
+    Gnu(ELFGnuHash),
+}
+
+impl ELFHashTable {
+    pub(crate) unsafe fn find(
+        &self,
+        name: &[u8],
+        symtab: *const Symbol,
+        strtab: &StringTable<'static>,
+    ) -> Option<Symbol> {
+        match self {
+            ELFHashTable::Gnu(hash_table) => hash_table.find(name, symtab, strtab),
+        }
+    }
+
+    pub(crate) fn parse_gnu_hash(ptr: *const u8) -> ELFHashTable {
+        ELFHashTable::Gnu(unsafe { ELFGnuHash::parse(ptr) })
+    }
+}
+
+#[derive(Debug)]
+struct ELFGnuHash {
     //不使用bloom，因此也就不保存bloom的信息
     nbucket: u32,
     table_start_idx: u32,

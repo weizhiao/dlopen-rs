@@ -4,20 +4,19 @@ use crate::{
     dynamic::ELFDynamic,
     elfloader_error,
     file::{Buf, ELFFile},
-    gnuhash::ELFGnuHash,
+    hash::ELFHashTable,
     relocation::{ELFRelas, ELFRelro},
     segment::ELFSegments,
     unlikely,
     unwind::UnwindInfo,
-    Rela, Result, Symbol, MASK, PAGE_SIZE,
+    Result, Symbol, MASK, PAGE_SIZE,
 };
 use elf::abi::*;
 
 #[derive(Debug)]
 #[allow(unused)]
 pub struct ELFLibrary {
-    //.gnu.hash
-    hashtab: ELFGnuHash,
+    pub(crate) hashtab: ELFHashTable,
     //.dynsym
     pub(crate) symtab: *const Symbol,
     //.dynstr
@@ -25,42 +24,25 @@ pub struct ELFLibrary {
     // 保存unwind信息,UnwindInfo一定要先于ELFMemory drop,
     // 因为__deregister_frame注销时会使用elf文件中eh_frame的地址
     // 一旦memory被销毁了，访问该地址就会发生段错误
-    unwind_info: UnwindInfo,
+    unwind_info: Option<UnwindInfo>,
     //elflibrary在内存中的映射
     pub(crate) segments: ELFSegments,
-    pub(crate) relro: Option<ELFRelro>,
     pub(crate) rela_sections: ELFRelas,
+    init_fn: Option<extern "C" fn()>,
+    init_array_fn: Option<&'static [extern "C" fn()]>,
 }
 
 impl ELFLibrary {
-    pub fn get(&self, name: &str) -> Option<*const ()> {
-        let bytes = name.as_bytes();
-        let name = if *bytes.last().unwrap() == 0 {
-            &bytes[..bytes.len() - 1]
-        } else {
-            bytes
-        };
-        let symbol = unsafe { self.hashtab.find(name, self.symtab, &self.strtab) };
-        if let Some(sym) = symbol {
-            return Some(unsafe {
-                self.segments
-                    .as_mut_ptr()
-                    .add(sym.st_value as usize - self.segments.addr_min())
-                    as *const ()
-            });
-        }
-        None
-    }
 
     pub fn from_file(path: &Path) -> Result<ELFLibrary> {
         let file = ELFFile::from_file(path)?;
         Self::load_library(file)
     }
 
-	pub fn from_binary(bytes:&[u8])->Result<ELFLibrary>{
-		let file = ELFFile::from_binary(bytes);
+    pub fn from_binary(bytes: &[u8]) -> Result<ELFLibrary> {
+        let file = ELFFile::from_binary(bytes);
         Self::load_library(file)
-	}
+    }
 
     pub(crate) fn load_library(mut file: ELFFile) -> Result<ELFLibrary> {
         //通常来说ehdr的后面就是phdrs，因此这里假设ehdr后面就是phdrs，会多读8个phdr的大小，若符合假设则可以减少一次系统调用
@@ -132,87 +114,27 @@ impl ELFLibrary {
             return elfloader_error("elf file does not have dynamic");
         }
 
-        if unlikely(unwind_info.is_none()) {
-            return elfloader_error("elf file does not have .eh_frame_hdr section");
-        }
-
         #[cfg(feature = "unwinding")]
         if unlikely(text_start == usize::MAX || text_start == text_end) {
             return elfloader_error("can not find .text start");
         }
 
-        let memory_slice = segments.as_mut_slice();
-        let memory_ptr = segments.as_mut_ptr();
-        let dynamics = dynamics.unwrap();
-        let unwind_info = unwind_info.unwrap();
-
-        let mut hash_off = usize::MAX;
-        let mut symtab_off = usize::MAX;
-        let mut strtab_off = usize::MAX;
-        let mut strtab_size = usize::MAX;
-        let mut pltrel_size = usize::MAX;
-        let mut pltrel_off = usize::MAX;
-        let mut is_rel = true;
-
-        for dynamic in dynamics.iter() {
-            match dynamic.d_tag {
-                DT_GNU_HASH => hash_off = dynamic.d_un as usize,
-                DT_SYMTAB => symtab_off = dynamic.d_un as usize,
-                DT_STRTAB => strtab_off = dynamic.d_un as usize,
-                DT_STRSZ => strtab_size = dynamic.d_un as usize,
-                DT_PLTRELSZ => pltrel_size = dynamic.d_un as usize,
-                DT_JMPREL => pltrel_off = dynamic.d_un as usize,
-                DT_PLTREL => is_rel = dynamic.d_un == DT_REL as u64,
-                _ => {}
-            }
-        }
-
-        //检验elfloader需要使用的节是否都存在
-        if unlikely(hash_off == usize::MAX) {
-            return elfloader_error("dynamic section does not have DT_GNU_HASH");
-        }
-
-        if unlikely(symtab_off == usize::MAX) {
-            return elfloader_error("dynamic section does not have DT_SYMTAB");
-        }
-
-        if unlikely(strtab_off == usize::MAX) {
-            return elfloader_error("dynamic section does not have DT_STRTAB");
-        }
-
-        if unlikely(strtab_size == usize::MAX) {
-            return elfloader_error("dynamic section does not have DT_STRSZ");
-        }
-
-        hash_off -= addr_min;
-        symtab_off -= addr_min;
-        strtab_off -= addr_min;
-
-        let strtab_off_end = strtab_off + strtab_size;
-        let strtab = elf::string_table::StringTable::new(&memory_slice[strtab_off..strtab_off_end]);
+        let dynamics = dynamics.unwrap()?;
+        let strtab = elf::string_table::StringTable::new(dynamics.strtab());
 
         //可能没有重定位段
-        let rela_sections = if pltrel_off != usize::MAX {
-            if unlikely(is_rel) {
-                return elfloader_error("unsupport rel");
-            }
-            pltrel_off -= addr_min;
-            ELFRelas {
-                pltrel: unsafe {
-                    core::slice::from_raw_parts(
-                        segments.as_mut_ptr().add(pltrel_off) as _,
-                        pltrel_size / core::mem::size_of::<Rela>(),
-                    )
-                },
-            }
-        } else {
-            ELFRelas { pltrel: &[] }
+        let rela_sections = ELFRelas {
+            pltrel: dynamics.pltrel(),
+            rel: dynamics.rela(),
+            relro,
         };
 
-        let hashtab = unsafe { ELFGnuHash::parse(memory_ptr.add(hash_off)) };
-        let symtab = unsafe { memory_ptr.add(symtab_off) as _ };
+        let hashtab = ELFHashTable::parse_gnu_hash(dynamics.hash() as _);
+        let symtab = dynamics.dynsym() as _;
 
-        unwind_info.register_unwind_info();
+        if let Some(unwind_info) = &unwind_info {
+            unwind_info.register_unwind_info();
+        }
 
         let elf_lib = ELFLibrary {
             segments,
@@ -221,8 +143,21 @@ impl ELFLibrary {
             strtab,
             unwind_info,
             rela_sections,
-            relro,
+            init_fn: dynamics.init_fn(),
+            init_array_fn: dynamics.init_array_fn(),
         };
         Ok(elf_lib)
+    }
+
+    pub fn do_init(&self) {
+        if let Some(init) = self.init_fn {
+            init();
+        }
+
+        if let Some(init_array) = self.init_array_fn {
+            for init in init_array {
+                init();
+            }
+        }
     }
 }
