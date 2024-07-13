@@ -28,10 +28,11 @@ pub struct ELFLibrary {
     //elflibrary在内存中的映射
     pub(crate) segments: ELFSegments,
     pub(crate) rela_sections: ELFRelas,
-    init_fn: Option<extern "C" fn()>,
-    init_array_fn: Option<&'static [extern "C" fn()]>,
+    pub(crate) init_fn: Option<extern "C" fn()>,
+    pub(crate) init_array_fn: Option<&'static [extern "C" fn()]>,
     fini_fn: Option<extern "C" fn()>,
     fini_array_fn: Option<&'static [extern "C" fn()]>,
+    needed_libs: Vec<&'static str>,
 }
 
 impl Drop for ELFLibrary {
@@ -59,7 +60,6 @@ impl ELFLibrary {
     }
 
     pub(crate) fn load_library(mut file: ELFFile) -> Result<ELFLibrary> {
-        //通常来说ehdr的后面就是phdrs，因此这里假设ehdr后面就是phdrs，会多读8个phdr的大小，若符合假设则可以减少一次系统调用
         #[cfg(feature = "std")]
         let mut buf = Buf::new();
         #[cfg(not(feature = "std"))]
@@ -136,7 +136,12 @@ impl ELFLibrary {
         let dynamics = dynamics.unwrap()?;
         let strtab = elf::string_table::StringTable::new(dynamics.strtab());
 
-        //可能没有重定位段
+        let needed_libs: Vec<&'static str> = dynamics
+            .needed_libs()
+            .iter()
+            .map(|needed_lib| strtab.get(*needed_lib).unwrap())
+            .collect();
+
         let rela_sections = ELFRelas {
             pltrel: dynamics.pltrel(),
             rel: dynamics.rela(),
@@ -161,19 +166,8 @@ impl ELFLibrary {
             init_array_fn: dynamics.init_array_fn(),
             fini_fn: dynamics.fini_fn(),
             fini_array_fn: dynamics.fini_array_fn(),
+            needed_libs,
         };
         Ok(elf_lib)
-    }
-
-    pub fn do_init(&self) {
-        if let Some(init) = self.init_fn {
-            init();
-        }
-
-        if let Some(init_array) = self.init_array_fn {
-            for init in init_array {
-                init();
-            }
-        }
     }
 }

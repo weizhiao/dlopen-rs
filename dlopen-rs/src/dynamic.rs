@@ -11,6 +11,7 @@ pub(crate) struct ELFDynamic {
     fini_array_fn: Option<&'static [extern "C" fn()]>,
     pltrel: Option<&'static [Rela]>,
     rela: Option<&'static [Rela]>,
+    needed_libs: Vec<usize>,
 }
 
 impl ELFDynamic {
@@ -40,9 +41,11 @@ impl ELFDynamic {
         let mut init_array_size = None;
         let mut fini_array_off = None;
         let mut fini_array_size = None;
+        let mut needed_libs = vec![];
 
         for dynamic in dynamics {
             match dynamic.d_tag {
+                DT_NEEDED => needed_libs.push(dynamic.d_un as usize),
                 DT_GNU_HASH => hash_off = Some(dynamic.d_un as usize),
                 DT_SYMTAB => symtab_off = Some(dynamic.d_un as usize),
                 DT_STRTAB => strtab_off = Some(dynamic.d_un as usize),
@@ -149,6 +152,7 @@ impl ELFDynamic {
             fini_array_fn,
             pltrel,
             rela,
+            needed_libs,
         })
     }
 
@@ -186,5 +190,9 @@ impl ELFDynamic {
 
     pub(crate) fn fini_array_fn(&self) -> Option<&'static [extern "C" fn()]> {
         self.fini_array_fn
+    }
+
+    pub(crate) fn needed_libs(&self) -> &Vec<usize> {
+        &self.needed_libs
     }
 }

@@ -115,7 +115,10 @@ impl ELFLibrary {
                         .map_err(parse_err_convert)?;
                     let mut symbol = None;
                     for lib in libs {
-                        symbol = lib.get_sym(name);
+                        if let Some(sym) = lib.get_sym(name) {
+                            symbol = Some(sym);
+							break;
+                        }
                     }
 
                     if symbol.is_none() {
@@ -146,6 +149,16 @@ impl ELFLibrary {
                 Err(Error::RelocateError {
                     msg: format!("can not relocate symbol {}", name),
                 })
+            }
+        }
+
+        if let Some(init) = self.init_fn {
+            init();
+        }
+
+        if let Some(init_array) = self.init_array_fn {
+            for init in init_array {
+                init();
             }
         }
 
