@@ -30,6 +30,11 @@ default-features = false
 features = ['mman', 'signal']
 optional = true
 
+[dependencies.phf]
+version = '0.11'
+default-features = false
+features = ['macros']
+
 [dependencies]
 elf = { version = "0.7.4", default-features = false }
 

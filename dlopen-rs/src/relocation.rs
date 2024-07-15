@@ -1,6 +1,6 @@
 use crate::{
-    elfloader_error, loader::ELFLibrary, parse_err_convert, segment::ELFSegments, tls::ELFTLS,
-    Error, Phdr, Rela, Result, MASK, PAGE_SIZE, REL_BIT, REL_MASK,
+    builtin::BUILTIN, elfloader_error, loader::ELFLibrary, parse_err_convert, segment::ELFSegments,
+    tls::ELFTLS, Error, Phdr, Rela, Result, MASK, PAGE_SIZE, REL_BIT, REL_MASK,
 };
 use core::ptr::NonNull;
 use elf::abi::*;
@@ -48,11 +48,11 @@ impl ELFRelro {
 }
 
 pub trait GetSymbol {
-    fn get_sym(&self, name: &str) -> Option<&*const ()>;
+    fn get_sym(&self, name: &str) -> Option<*const ()>;
 }
 
 impl GetSymbol for ELFLibrary {
-    fn get_sym(&self, name: &str) -> Option<&*const ()> {
+    fn get_sym(&self, name: &str) -> Option<*const ()> {
         let bytes = name.as_bytes();
         let name = if *bytes.last().unwrap() == 0 {
             &bytes[..bytes.len() - 1]
@@ -61,9 +61,7 @@ impl GetSymbol for ELFLibrary {
         };
         let symbol = unsafe { self.hashtab.find(name, self.symtab, &self.strtab) };
         if let Some(sym) = symbol {
-            return Some(unsafe {
-                core::mem::transmute(self.segments.as_mut_ptr().add(sym.st_value as usize))
-            });
+            return Some(unsafe { self.segments.as_mut_ptr().add(sym.st_value as usize) as _ });
         }
         None
     }
@@ -118,35 +116,33 @@ impl ELFLibrary {
                         .strtab
                         .get(dynsym.st_name as usize)
                         .map_err(parse_err_convert)?;
-                    let mut symbol = None;
 
-                    for lib in inner_libs {
-                        if let Some(sym) = lib.get_sym(name) {
-                            symbol = Some(sym);
-                            break;
-                        }
-                    }
-
-                    if symbol.is_none() {
-                        for lib in extern_libs {
-                            if let Some(sym) = lib.get_sym(name) {
-                                symbol = Some(sym);
-                                break;
+                    let symbol = BUILTIN
+                        .get(&name)
+                        .copied()
+                        .or_else(|| {
+                            for lib in inner_libs {
+                                if let Some(sym) = lib.get_sym(name) {
+                                    return Some(sym);
+                                }
                             }
-                        }
-                    }
-
-                    let symbol = if let Some(sym) = symbol {
-                        sym
-                    } else {
-                        return relocate_error(&name);
-                    };
+                            None
+                        })
+                        .or_else(|| {
+                            for lib in extern_libs {
+                                if let Some(sym) = lib.get_sym(name) {
+                                    return Some(sym);
+                                }
+                            }
+                            None
+                        })
+                        .ok_or_else(|| relocate_error(&name))?;
 
                     let rel_addr = unsafe {
                         self.segments.as_mut_ptr().add(rela.r_offset as usize) as *mut usize
                     };
 
-                    unsafe { rel_addr.write(*symbol as usize) }
+                    unsafe { rel_addr.write(symbol as usize) }
                 }
                 // B + A
                 REL_RELATIVE => {
@@ -171,10 +167,10 @@ impl ELFLibrary {
 
             #[cold]
             #[inline(never)]
-            fn relocate_error(name: &str) -> Result<()> {
-                Err(Error::RelocateError {
+            fn relocate_error(name: &str) -> crate::Error {
+                Error::RelocateError {
                     msg: format!("can not relocate symbol {}", name),
-                })
+                }
             }
         }
 

@@ -122,7 +122,7 @@ impl ELFLibrary {
                 PT_DYNAMIC => dynamics = Some(ELFDynamic::new(phdr, &segments)),
                 PT_GNU_EH_FRAME => unwind_info = Some(UnwindInfo::new(phdr, &segments)?),
                 PT_GNU_RELRO => relro = Some(ELFRelro::new(phdr, &segments)),
-                PT_TLS => tls = Some(Box::new(ELFTLS::new(phdr, &segments))),
+                PT_TLS => tls = Some(Box::new(unsafe { ELFTLS::new(phdr, &segments) })),
                 _ => {}
             }
         }
