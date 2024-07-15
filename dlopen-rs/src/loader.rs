@@ -7,7 +7,6 @@ use crate::{
     hash::ELFHashTable,
     relocation::{ELFRelas, ELFRelro},
     segment::ELFSegments,
-    tls::ELFTLS,
     unlikely,
     unwind::UnwindInfo,
     Result, Symbol, MASK, PAGE_SIZE,
@@ -34,6 +33,8 @@ pub struct ELFLibrary {
     fini_fn: Option<extern "C" fn()>,
     fini_array_fn: Option<&'static [extern "C" fn()]>,
     needed_libs: Vec<&'static str>,
+    #[cfg(feature = "tls")]
+    pub(crate) tls: Option<Box<crate::tls::ELFTLS>>,
 }
 
 impl Drop for ELFLibrary {
@@ -103,6 +104,7 @@ impl ELFLibrary {
         let mut unwind_info = None;
         let mut dynamics = None;
         let mut relro = None;
+        #[cfg(feature = "tls")]
         let mut tls = None;
 
         for phdr in phdrs {
@@ -122,7 +124,12 @@ impl ELFLibrary {
                 PT_DYNAMIC => dynamics = Some(ELFDynamic::new(phdr, &segments)),
                 PT_GNU_EH_FRAME => unwind_info = Some(UnwindInfo::new(phdr, &segments)?),
                 PT_GNU_RELRO => relro = Some(ELFRelro::new(phdr, &segments)),
-                PT_TLS => tls = Some(Box::new(unsafe { ELFTLS::new(phdr, &segments) })),
+                #[cfg(feature = "tls")]
+                PT_TLS => {
+                    tls = Some(Box::new(unsafe {
+                        crate::tls::ELFTLS::new(phdr, &segments)
+                    }))
+                }
                 _ => {}
             }
         }
@@ -149,7 +156,6 @@ impl ELFLibrary {
             pltrel: dynamics.pltrel(),
             rel: dynamics.rela(),
             relro,
-            tls,
         };
 
         let hashtab = ELFHashTable::parse_gnu_hash(dynamics.hash() as _);
@@ -171,6 +177,8 @@ impl ELFLibrary {
             fini_fn: dynamics.fini_fn(),
             fini_array_fn: dynamics.fini_array_fn(),
             needed_libs,
+            #[cfg(feature = "tls")]
+            tls,
         };
         Ok(elf_lib)
     }

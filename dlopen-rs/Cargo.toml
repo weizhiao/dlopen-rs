@@ -39,8 +39,9 @@ features = ['macros']
 elf = { version = "0.7.4", default-features = false }
 
 [features]
-default = ["std", "mmap"]
+default = ["std", "mmap","tls"]
 std = []
 mmap = ["dep:nix"]
+tls = []
 nightly = []
 unwinding = ["dep:unwinding"]

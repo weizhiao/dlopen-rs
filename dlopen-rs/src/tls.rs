@@ -1,8 +1,8 @@
-use std::{alloc::Layout, mem::MaybeUninit};
+use std::{alloc::Layout, mem::MaybeUninit, sync::Mutex};
 
-use nix::
-    libc::{pthread_getspecific, pthread_key_create, pthread_key_t, pthread_setspecific}
-;
+use nix::libc::{
+    pthread_getspecific, pthread_key_create, pthread_key_delete, pthread_key_t, pthread_setspecific,
+};
 
 use crate::{segment::ELFSegments, Phdr};
 
@@ -13,6 +13,8 @@ pub(crate) struct ELFTLS {
     len: usize,
     size: usize,
     key: pthread_key_t,
+	/// 用于释放内存
+    mem_pool: Mutex<Vec<(*mut u8, Layout)>>,
 }
 
 impl ELFTLS {
@@ -27,6 +29,16 @@ impl ELFTLS {
             len: phdr.p_filesz as usize,
             size: phdr.p_memsz as usize,
             key: key.assume_init(),
+            mem_pool: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl Drop for ELFTLS {
+    fn drop(&mut self) {
+        unsafe { pthread_key_delete(self.key) };
+        for (ptr, layout) in self.mem_pool.get_mut().unwrap().iter() {
+            unsafe { alloc::alloc::dealloc(*ptr, *layout) }
         }
     }
 }
@@ -34,20 +46,20 @@ impl ELFTLS {
 #[repr(C)]
 pub(crate) struct TLSArg<'a> {
     tls: &'a ELFTLS,
-    offset: usize,
 }
 
 pub(crate) unsafe extern "C" fn tls_get_addr(args: &TLSArg) -> *const u8 {
     let val = pthread_getspecific(args.tls.key);
     let memory = if val.is_null() {
-		let layout = Layout::from_size_align(args.tls.size, args.tls.align).unwrap();
-		let memory=alloc::alloc::alloc_zeroed(layout);
+        let layout = Layout::from_size_align(args.tls.size, args.tls.align).unwrap();
+        let memory = alloc::alloc::alloc_zeroed(layout);
         memory.copy_from_nonoverlapping(args.tls.image, args.tls.len);
         pthread_setspecific(args.tls.key, memory.cast());
+        args.tls.mem_pool.lock().unwrap().push((memory, layout));
         memory
     } else {
         val as *mut u8
     };
 
-    memory.add(args.offset)
+    memory
 }

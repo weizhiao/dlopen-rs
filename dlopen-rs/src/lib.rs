@@ -8,6 +8,7 @@ mod relocation;
 mod segment;
 mod unwind;
 mod builtin;
+#[cfg(feature="tls")]
 mod tls;
 
 pub use loader::ELFLibrary;
