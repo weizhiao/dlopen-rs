@@ -8,6 +8,7 @@ mod relocation;
 mod segment;
 mod unwind;
 mod builtin;
+mod tls;
 
 pub use loader::ELFLibrary;
 pub use relocation::GetSymbol;

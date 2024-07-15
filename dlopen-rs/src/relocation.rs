@@ -1,6 +1,6 @@
 use crate::{
-    elfloader_error, loader::ELFLibrary, parse_err_convert, segment::ELFSegments, Error, Phdr,
-    Rela, Result, MASK, PAGE_SIZE, REL_BIT, REL_MASK,
+    elfloader_error, loader::ELFLibrary, parse_err_convert, segment::ELFSegments, tls::ELFTLS,
+    Error, Phdr, Rela, Result, MASK, PAGE_SIZE, REL_BIT, REL_MASK,
 };
 use core::ptr::NonNull;
 use elf::abi::*;
@@ -11,6 +11,7 @@ pub(crate) struct ELFRelas {
     pub(crate) pltrel: Option<&'static [Rela]>,
     pub(crate) rel: Option<&'static [Rela]>,
     pub(crate) relro: Option<ELFRelro>,
+    pub(crate) tls: Option<Box<ELFTLS>>,
 }
 
 #[allow(unused)]
@@ -155,7 +156,13 @@ impl ELFLibrary {
                     unsafe { rel_addr.write(self.segments.base() + rela.r_addend as usize) }
                 }
                 REL_DTPMOD => {
-                    todo!("REL_DTPMOD")
+                    let rel_addr = unsafe {
+                        self.segments.as_mut_ptr().add(rela.r_offset as usize) as *mut usize
+                    };
+                    unsafe {
+                        rel_addr.write(self.rela_sections.tls.as_ref().unwrap().as_ref()
+                            as *const ELFTLS as usize)
+                    }
                 }
                 _ => {
                     return elfloader_error("unsupport rela type");

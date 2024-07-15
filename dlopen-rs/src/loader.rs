@@ -7,6 +7,7 @@ use crate::{
     hash::ELFHashTable,
     relocation::{ELFRelas, ELFRelro},
     segment::ELFSegments,
+    tls::ELFTLS,
     unlikely,
     unwind::UnwindInfo,
     Result, Symbol, MASK, PAGE_SIZE,
@@ -102,6 +103,7 @@ impl ELFLibrary {
         let mut unwind_info = None;
         let mut dynamics = None;
         let mut relro = None;
+        let mut tls = None;
 
         for phdr in phdrs {
             match phdr.p_type {
@@ -120,6 +122,7 @@ impl ELFLibrary {
                 PT_DYNAMIC => dynamics = Some(ELFDynamic::new(phdr, &segments)),
                 PT_GNU_EH_FRAME => unwind_info = Some(UnwindInfo::new(phdr, &segments)?),
                 PT_GNU_RELRO => relro = Some(ELFRelro::new(phdr, &segments)),
+                PT_TLS => tls = Some(Box::new(ELFTLS::new(phdr, &segments))),
                 _ => {}
             }
         }
@@ -146,6 +149,7 @@ impl ELFLibrary {
             pltrel: dynamics.pltrel(),
             rel: dynamics.rela(),
             relro,
+            tls,
         };
 
         let hashtab = ELFHashTable::parse_gnu_hash(dynamics.hash() as _);
