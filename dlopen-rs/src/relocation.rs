@@ -69,10 +69,14 @@ impl GetSymbol for ELFLibrary {
 }
 
 impl ELFLibrary {
-    // FIXME:dyn may cause performance degradation
-    pub fn relocate_with(&self, libs: &[&dyn GetSymbol]) -> Result<()> {
+    pub fn relocate_with(
+        &self,
+        inner_libs: &[&ELFLibrary],
+        extern_libs: &[&dyn GetSymbol],
+    ) -> Result<()> {
         const REL_RELATIVE: u32 = R_X86_64_RELATIVE;
         const REL_GOT: u32 = R_X86_64_GLOB_DAT;
+        const REL_DTPMOD: u32 = R_X86_64_DTPMOD64;
 
         #[cfg(target_arch = "x86_64")]
         const REL_JUMP_SLOT: u32 = R_X86_64_JUMP_SLOT;
@@ -114,22 +118,34 @@ impl ELFLibrary {
                         .get(dynsym.st_name as usize)
                         .map_err(parse_err_convert)?;
                     let mut symbol = None;
-                    for lib in libs {
+
+                    for lib in inner_libs {
                         if let Some(sym) = lib.get_sym(name) {
                             symbol = Some(sym);
-							break;
+                            break;
                         }
                     }
 
                     if symbol.is_none() {
-                        return relocate_error(&name);
+                        for lib in extern_libs {
+                            if let Some(sym) = lib.get_sym(name) {
+                                symbol = Some(sym);
+                                break;
+                            }
+                        }
                     }
+
+                    let symbol = if let Some(sym) = symbol {
+                        sym
+                    } else {
+                        return relocate_error(&name);
+                    };
 
                     let rel_addr = unsafe {
                         self.segments.as_mut_ptr().add(rela.r_offset as usize) as *mut usize
                     };
 
-                    unsafe { rel_addr.write(*symbol.unwrap() as usize) }
+                    unsafe { rel_addr.write(*symbol as usize) }
                 }
                 // B + A
                 REL_RELATIVE => {
@@ -137,6 +153,9 @@ impl ELFLibrary {
                         self.segments.as_mut_ptr().add(rela.r_offset as usize) as *mut usize
                     };
                     unsafe { rel_addr.write(self.segments.base() + rela.r_addend as usize) }
+                }
+                REL_DTPMOD => {
+                    todo!("REL_DTPMOD")
                 }
                 _ => {
                     return elfloader_error("unsupport rela type");

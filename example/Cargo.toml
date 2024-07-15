@@ -1,0 +1,13 @@
+[package]
+name = "example"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies.hashbrown]
+version = '0.14'
+default-features = false
+features = ['ahash', 'inline-more']
+
+[dependencies]
+dlopen-rs = { path = "../dlopen-rs" }
+libloading = "0.8.0"
