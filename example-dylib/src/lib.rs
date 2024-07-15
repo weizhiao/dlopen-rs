@@ -4,7 +4,26 @@
 //! It exports multiple symbols with different types and abis.
 //! It's main purpose is to be used in tests of dynlib crate.
 
-use std::os::raw::{c_char, c_int};
+use std::{
+    cell::Cell,
+    os::raw::{c_char, c_int},
+    thread,
+};
+
+thread_local! {
+    static NUM:Cell<i32>=Cell::new(0)
+}
+
+#[no_mangle]
+pub extern "C" fn c_test() {
+    let handle=thread::spawn(|| {
+        NUM.set(1);
+        println!("{}", NUM.get());
+    });
+	handle.join().unwrap();
+	NUM.set(2);
+	println!("{}", NUM.get());
+}
 
 //FUNCTIONS
 #[no_mangle]

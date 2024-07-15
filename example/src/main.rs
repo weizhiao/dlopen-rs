@@ -27,4 +27,7 @@ fn main() {
     let g = lib.get_sym("c_fun_print_something_else").unwrap();
     let g: extern "C" fn() = unsafe { core::mem::transmute(g) };
     g();
+	let f = lib.get_sym("c_test").unwrap();
+    let f: extern "C" fn() = unsafe { core::mem::transmute(f) };
+    f();
 }
