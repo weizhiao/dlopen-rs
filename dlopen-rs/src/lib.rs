@@ -8,6 +8,7 @@ mod relocation;
 mod segment;
 mod unwind;
 mod builtin;
+mod handle;
 #[cfg(feature="tls")]
 mod tls;
 

@@ -1,6 +1,6 @@
 use crate::{
-    builtin::BUILTIN, elfloader_error, loader::ELFLibrary, parse_err_convert, segment::ELFSegments,
-    Error, Phdr, Rela, Result, MASK, PAGE_SIZE, REL_BIT, REL_MASK,
+    builtin::BUILTIN, elfloader_error, handle::ELFHandle, loader::ELFLibrary, parse_err_convert,
+    segment::ELFSegments, Error, Phdr, Rela, Result, MASK, PAGE_SIZE, REL_BIT, REL_MASK,
 };
 use core::ptr::NonNull;
 use elf::abi::*;
@@ -50,8 +50,8 @@ pub trait GetSymbol {
     fn get_sym(&self, name: &str) -> Option<*const ()>;
 }
 
-impl GetSymbol for ELFLibrary {
-    fn get_sym(&self, name: &str) -> Option<*const ()> {
+impl ELFLibrary {
+    pub(crate) fn get_sym(&self, name: &str) -> Option<*const ()> {
         let bytes = name.as_bytes();
         let name = if *bytes.last().unwrap() == 0 {
             &bytes[..bytes.len() - 1]
@@ -67,11 +67,11 @@ impl GetSymbol for ELFLibrary {
 }
 
 impl ELFLibrary {
-    pub fn relocate_with(
-        &self,
-        inner_libs: &[&ELFLibrary],
-        extern_libs: &[&dyn GetSymbol],
-    ) -> Result<()> {
+    pub fn relocate_with<'a>(
+        self,
+        inner_libs: &[&'a ELFLibrary],
+        extern_libs: &[&'a dyn GetSymbol],
+    ) -> Result<ELFHandle<'a>> {
         const REL_RELATIVE: u32 = R_X86_64_RELATIVE;
         const REL_GOT: u32 = R_X86_64_GLOB_DAT;
         const REL_DTPMOD: u32 = R_X86_64_DTPMOD64;
@@ -150,14 +150,15 @@ impl ELFLibrary {
                     };
                     unsafe { rel_addr.write(self.segments.base() + rela.r_addend as usize) }
                 }
-				#[cfg(feature = "tls")]
+                #[cfg(feature = "tls")]
                 REL_DTPMOD => {
                     let rel_addr = unsafe {
                         self.segments.as_mut_ptr().add(rela.r_offset as usize) as *mut usize
                     };
                     unsafe {
                         rel_addr.write(self.tls.as_ref().unwrap().as_ref()
-                            as *const crate::tls::ELFTLS as usize)
+                            as *const crate::tls::ELFTLS
+                            as usize)
                     }
                 }
                 _ => {
@@ -188,6 +189,6 @@ impl ELFLibrary {
             relro.relro()?;
         }
 
-        Ok(())
+        Ok(ELFHandle::new(self))
     }
 }
