@@ -1,11 +1,9 @@
-use std::path::Path;
-
 use crate::{
     dynamic::ELFDynamic,
     elfloader_error,
     file::{Buf, ELFFile},
     hash::ELFHashTable,
-    relocation::{ELFRelas, ELFRelro},
+    relocation::{ELFRelocation, ELFRelro},
     segment::ELFSegments,
     unlikely,
     unwind::UnwindInfo,
@@ -15,7 +13,7 @@ use elf::abi::*;
 
 #[derive(Debug)]
 #[allow(unused)]
-pub struct ELFLibrary {
+pub(crate) struct ELFLibraryInner {
     pub(crate) hashtab: ELFHashTable,
     //.dynsym
     pub(crate) symtab: *const Symbol,
@@ -27,41 +25,29 @@ pub struct ELFLibrary {
     unwind_info: Option<UnwindInfo>,
     //elflibrary在内存中的映射
     pub(crate) segments: ELFSegments,
-    pub(crate) rela_sections: ELFRelas,
+    pub(crate) relocation: ELFRelocation,
     pub(crate) init_fn: Option<extern "C" fn()>,
     pub(crate) init_array_fn: Option<&'static [extern "C" fn()]>,
-    fini_fn: Option<extern "C" fn()>,
-    fini_array_fn: Option<&'static [extern "C" fn()]>,
+    pub(crate) fini_fn: Option<extern "C" fn()>,
+    pub(crate) fini_array_fn: Option<&'static [extern "C" fn()]>,
     needed_libs: Vec<&'static str>,
     #[cfg(feature = "tls")]
     pub(crate) tls: Option<Box<crate::tls::ELFTLS>>,
 }
 
-impl Drop for ELFLibrary {
-    fn drop(&mut self) {
-        if let Some(fini) = self.fini_fn {
-            fini();
-        }
-        if let Some(fini_array) = self.fini_array_fn {
-            for fini in fini_array {
-                fini();
-            }
-        }
-    }
-}
-
-impl ELFLibrary {
-    pub fn from_file(path: &Path) -> Result<ELFLibrary> {
-        let file = ELFFile::from_file(path)?;
-        Self::load_library(file)
+impl ELFLibraryInner {
+    pub(crate) fn get_sym(&self, name: &str) -> Option<&Symbol> {
+        let bytes = name.as_bytes();
+        let name = if *bytes.last().unwrap() == 0 {
+            &bytes[..bytes.len() - 1]
+        } else {
+            bytes
+        };
+        let symbol = unsafe { self.hashtab.find(name, self.symtab, &self.strtab) };
+        symbol
     }
 
-    pub fn from_binary(bytes: &[u8]) -> Result<ELFLibrary> {
-        let file = ELFFile::from_binary(bytes);
-        Self::load_library(file)
-    }
-
-    pub(crate) fn load_library(mut file: ELFFile) -> Result<ELFLibrary> {
+    pub(crate) fn load_library(mut file: ELFFile) -> Result<ELFLibraryInner> {
         #[cfg(feature = "std")]
         let mut buf = Buf::new();
         #[cfg(not(feature = "std"))]
@@ -152,7 +138,7 @@ impl ELFLibrary {
             .map(|needed_lib| strtab.get(*needed_lib).unwrap())
             .collect();
 
-        let rela_sections = ELFRelas {
+        let rela_sections = ELFRelocation {
             pltrel: dynamics.pltrel(),
             rel: dynamics.rela(),
             relro,
@@ -165,13 +151,13 @@ impl ELFLibrary {
             unwind_info.register_unwind_info();
         }
 
-        let elf_lib = ELFLibrary {
+        let elf_lib = ELFLibraryInner {
             segments,
             hashtab,
             symtab,
             strtab,
             unwind_info,
-            rela_sections,
+            relocation: rela_sections,
             init_fn: dynamics.init_fn(),
             init_array_fn: dynamics.init_array_fn(),
             fini_fn: dynamics.fini_fn(),

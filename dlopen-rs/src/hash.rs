@@ -12,7 +12,7 @@ impl ELFHashTable {
         name: &[u8],
         symtab: *const Symbol,
         strtab: &StringTable<'static>,
-    ) -> Option<Symbol> {
+    ) -> Option<&Symbol> {
         match self {
             ELFHashTable::Gnu(hash_table) => hash_table.find(name, symtab, strtab),
         }
@@ -97,7 +97,7 @@ impl ELFGnuHash {
         name: &[u8],
         symtab: *const Symbol,
         strtab: &StringTable<'static>,
-    ) -> Option<Symbol> {
+    ) -> Option<&Symbol> {
         let hash = ELFGnuHash::gnu_hash(name);
         let table_start_idx = self.table_start_idx as usize;
         let chain_start_idx = self
@@ -113,7 +113,7 @@ impl ELFGnuHash {
         loop {
             let chain_hash = cur_chain.read();
             if hash | 1 == chain_hash | 1 {
-                let cur_symbol = cur_symbol_ptr.read();
+                let cur_symbol = &*cur_symbol_ptr;
                 let sym_name = strtab.get_raw(cur_symbol.st_name as usize).unwrap();
                 if sym_name == name {
                     return Some(cur_symbol);

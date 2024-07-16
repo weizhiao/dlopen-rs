@@ -1,4 +1,4 @@
-use std::{mem::MaybeUninit, path::Path};
+use std::{ffi::OsStr, mem::MaybeUninit};
 
 use crate::{ehdr::ELFEhdr, Phdr, Result, BUF_SIZE};
 use snafu::ResultExt;
@@ -49,10 +49,10 @@ struct Buf;
 
 impl ELFFile {
     #[inline]
-    pub(crate) fn from_file(path: &Path) -> Result<ELFFile> {
+    pub(crate) fn from_file<P: AsRef<OsStr>>(path: P) -> Result<ELFFile> {
         use crate::IOSnafu;
         use std::fs::File;
-        let file = File::open(path).context(IOSnafu)?;
+        let file = File::open(path.as_ref()).context(IOSnafu)?;
         Ok(ELFFile {
             context: FileType::Fd(file),
         })

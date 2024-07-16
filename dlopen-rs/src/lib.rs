@@ -1,18 +1,18 @@
 #![cfg_attr(feature = "nightly", core_intrinsics)]
+mod builtin;
 mod dynamic;
 mod ehdr;
 mod file;
+mod handle;
 mod hash;
 mod loader;
 mod relocation;
 mod segment;
-mod unwind;
-mod builtin;
-mod handle;
-#[cfg(feature="tls")]
+#[cfg(feature = "tls")]
 mod tls;
+mod unwind;
 
-pub use loader::ELFLibrary;
+pub use handle::{ELFHandle, ELFLibrary};
 pub use relocation::GetSymbol;
 
 // 因为unlikely只能在nightly版本的编译器中使用

@@ -162,7 +162,7 @@ impl UnwindInfo {
 #[cfg(feature = "unwinding")]
 pub(crate) mod eh_finder {
 
-    use super::{ELFLibrary, UnwindInfo};
+    use super::{ELFLibraryInner, UnwindInfo};
     use alloc::sync::Arc;
     use hashbrown::HashTable;
     use spin::RwLock;
