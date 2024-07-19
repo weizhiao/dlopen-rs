@@ -44,50 +44,30 @@ const PAGE_SIZE: usize = 0x1000;
 
 const MASK: usize = (0 - PAGE_SIZE as isize) as usize;
 
-#[cfg(target_pointer_width = "64")]
-const E_CLASS: Class = Class::ELF64;
-#[cfg(target_pointer_width = "32")]
-const E_CLASS: Class = Class::ELF32;
-
-#[cfg(target_pointer_width = "64")]
-type Phdr = elf::segment::Elf64_Phdr;
-#[cfg(target_pointer_width = "32")]
-type Phdr = elf::segment::Elf32_Phdr;
-
-#[cfg(target_pointer_width = "64")]
-type Dyn = elf::dynamic::Elf64_Dyn;
-#[cfg(target_pointer_width = "32")]
-type Dyn = elf::dynamic::Elf32_Dyn;
-
-#[cfg(target_pointer_width = "64")]
-type Rela = elf::relocation::Elf64_Rela;
-#[cfg(target_pointer_width = "32")]
-type Rela = elf::relocation::Elf32_Rela;
-
-#[cfg(target_pointer_width = "64")]
-type Symbol = elf::symbol::Elf64_Sym;
-#[cfg(target_pointer_width = "32")]
-type Symbol = elf::symbol::Elf32_Sym;
-
-#[cfg(target_pointer_width = "64")]
-const REL_MASK: usize = 0xFFFFFFFF;
-#[cfg(target_pointer_width = "32")]
-const REL_MASK: usize = 0xFF;
-
-#[cfg(target_pointer_width = "64")]
-const REL_BIT: usize = 32;
-#[cfg(target_pointer_width = "32")]
-const REL_BIT: usize = 8;
-
-#[cfg(target_pointer_width = "64")]
-const PHDR_SIZE: usize = core::mem::size_of::<elf::segment::Elf64_Phdr>();
-#[cfg(target_pointer_width = "32")]
-const PHDR_SIZE: usize = core::mem::size_of::<elf::segment::Elf32_Phdr>();
-
-#[cfg(target_pointer_width = "64")]
-const EHDR_SIZE: usize = core::mem::size_of::<elf::file::Elf64_Ehdr>();
-#[cfg(target_pointer_width = "32")]
-const EHDR_SIZE: usize = core::mem::size_of::<elf::file::Elf32_Ehdr>();
+cfg_match! {
+    cfg(target_pointer_width = "64")=>{
+        const E_CLASS: Class = Class::ELF64;
+        type Phdr = elf::segment::Elf64_Phdr;
+        type Dyn = elf::dynamic::Elf64_Dyn;
+        type Rela = elf::relocation::Elf64_Rela;
+        type Symbol = elf::symbol::Elf64_Sym;
+        const REL_MASK: usize = 0xFFFFFFFF;
+        const REL_BIT: usize = 32;
+        const PHDR_SIZE: usize = core::mem::size_of::<elf::segment::Elf64_Phdr>();
+        const EHDR_SIZE: usize = core::mem::size_of::<elf::file::Elf64_Ehdr>();
+    }
+    _ =>{
+        const E_CLASS: Class = Class::ELF32;
+        type Phdr = elf::segment::Elf32_Phdr;
+        type Dyn = elf::dynamic::Elf32_Dyn;
+        type Rela = elf::relocation::Elf32_Rela;
+        type Symbol = elf::symbol::Elf32_Sym;
+        const REL_MASK: usize = 0xFF;
+        const REL_BIT: usize = 8;
+        const PHDR_SIZE: usize = core::mem::size_of::<elf::segment::Elf32_Phdr>();
+        const EHDR_SIZE: usize = core::mem::size_of::<elf::file::Elf32_Ehdr>();
+    }
+}
 
 #[cfg(feature = "std")]
 const BUF_SIZE: usize = EHDR_SIZE + 8 * PHDR_SIZE;
