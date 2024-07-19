@@ -16,21 +16,17 @@ impl GetSymbol for MyLib {
 }
 
 fn main() {
-    let path = Path::new("/home/wei/dlopen-rs/target/release/libexample.so");
+    let path = Path::new("/home/wei/dlopen-rs/target/x86_64-unknown-linux-musl/release/libexample.so");
 
-    let musl = ELFLibrary::from_file("/lib/x86_64-linux-musl/libc.so")
-        .unwrap()
-        .relocate(&[])
-        .unwrap();
     let libc = MyLib(unsafe { Library::new("/lib/x86_64-linux-gnu/libc.so.6").unwrap() });
 
     let libgcc = ELFLibrary::from_file("/usr/lib/llvm-19/lib/libunwind.so")
         .unwrap()
-        .relocate_with::<MyLib>(&[&musl], &[])
+        .relocate_with::<MyLib>(&[], &[&libc])
         .unwrap();
     let libexample = ELFLibrary::from_file(path)
         .unwrap()
-        .relocate_with::<MyLib>(&[&libgcc, &musl], &[])
+        .relocate_with::<MyLib>(&[&libgcc], &[&libc])
         .unwrap();
 
     let f = libexample.get_sym("c_fun_add_two").unwrap();
