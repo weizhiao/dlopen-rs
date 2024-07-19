@@ -1,7 +1,8 @@
+use crate::arch::*;
 use crate::{
     builtin::BUILTIN,
     elfloader_error,
-    handle::{ELFHandle, ELFLibrary},
+    handle::{ELFInstance, ELFLibrary},
     parse_err_convert,
     segment::ELFSegments,
     Error, Phdr, Rela, Result, MASK, PAGE_SIZE, REL_BIT, REL_MASK,
@@ -55,33 +56,25 @@ pub trait GetSymbol {
 }
 
 impl ELFLibrary {
+    pub fn relocate(self, inner_libs: &[&ELFInstance]) -> Result<ELFInstance> {
+        struct Dump;
+        impl GetSymbol for Dump {
+            #[cold]
+            fn get_sym(&self, _name: &str) -> Option<*const ()> {
+                None
+            }
+        }
+        self.relocate_with::<Dump>(inner_libs, &[])
+    }
+
     pub fn relocate_with<T>(
         self,
-        raw_libs: &[&ELFLibrary],
-        handle_libs: &[&ELFHandle],
+        inner_libs: &[&ELFInstance],
         extern_libs: &[&T],
-    ) -> Result<ELFHandle>
+    ) -> Result<ELFInstance>
     where
         T: GetSymbol,
     {
-        const REL_RELATIVE: u32 = R_X86_64_RELATIVE;
-        const REL_GOT: u32 = R_X86_64_GLOB_DAT;
-        const REL_DTPMOD: u32 = R_X86_64_DTPMOD64;
-        const REL_SYMBOLIC: u32 = R_X86_64_64;
-        const REL_IRELATIVE: u32 = R_X86_64_IRELATIVE;
-        const REL_TPOFF: u32 = R_X86_64_TPOFF64;
-
-        #[cfg(target_arch = "x86_64")]
-        const REL_JUMP_SLOT: u32 = R_X86_64_JUMP_SLOT;
-        #[cfg(target_arch = "x86")]
-        const REL_JUMP_SLOT: u32 = R_X86_64_JUMP_SLOT;
-        #[cfg(target_arch = "aarch64")]
-        const REL_JUMP_SLOT: u32 = R_AARCH64_JUMP_SLOT;
-        #[cfg(target_arch = "arm")]
-        const REL_JUMP_SLOT: u32 = R_ARM_JUMP_SLOT;
-        #[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
-        const REL_JUMP_SLOT: u32 = R_RISCV_JUMP_SLOT;
-
         let pltrel = if let Some(pltrel) = self.relocation().pltrel {
             pltrel.iter()
         } else {
@@ -131,18 +124,7 @@ impl ELFLibrary {
                                     });
                                 }
 
-                                for lib in raw_libs {
-                                    if let Some(sym) = lib.get_sym(name) {
-                                        return Some(unsafe {
-                                            self.segments()
-                                                .as_mut_ptr()
-                                                .add(sym.st_value as usize)
-                                                .cast()
-                                        });
-                                    }
-                                }
-
-                                for lib in handle_libs {
+                                for lib in inner_libs {
                                     if let Some(sym) = lib.get_sym(name) {
                                         return Some(sym);
                                     }
@@ -186,10 +168,6 @@ impl ELFLibrary {
                     };
                     unsafe { rel_addr.write(ifunc()) }
                 }
-                REL_TPOFF => {
-                    // TODO:这个要根据TLS的实现来进行操作，可能还要覆盖glibc的一些符号
-                    todo!("REL_TPOFF")
-                }
 
                 #[cfg(feature = "tls")]
                 REL_DTPMOD => {
@@ -203,6 +181,12 @@ impl ELFLibrary {
                     }
                 }
                 _ => {
+                    // REL_TPOFF：这种类型的重定位明显做不到，它是为静态模型设计的，这种方式
+                    // 可以通过带偏移量的内存读取来获取TLS变量，无需使用__tls_get_addr，
+                    // 即可以使用它来较快的访问那些在程序启动时就确定加载的dso中的TLS，
+                    // 实现它需要对要libc做修改，因为它要使用tp来访问thread local，
+                    // 而线程栈里保存的东西完全是由libc控制的
+
                     return elfloader_error("unsupport relocate type");
                 }
             }
@@ -230,10 +214,9 @@ impl ELFLibrary {
             relro.relro()?;
         }
 
-        let mut inner_libs = vec![];
-        inner_libs.extend(raw_libs.into_iter().map(|lib| lib.inner.clone()));
-        inner_libs.extend(handle_libs.into_iter().map(|lib| lib.inner.inner.clone()));
+        let mut needed = vec![];
+        needed.extend(inner_libs.iter().map(|lib| (*lib).clone()));
 
-        Ok(ELFHandle::new(self, inner_libs))
+        Ok(ELFInstance::new(self, needed))
     }
 }

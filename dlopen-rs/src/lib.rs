@@ -1,4 +1,6 @@
+#![feature(cfg_match)]
 #![cfg_attr(feature = "nightly", core_intrinsics)]
+mod arch;
 mod builtin;
 mod dynamic;
 mod ehdr;
@@ -12,7 +14,7 @@ mod segment;
 mod tls;
 mod unwind;
 
-pub use handle::{ELFHandle, ELFLibrary};
+pub use handle::{ELFInstance, ELFLibrary};
 pub use relocation::GetSymbol;
 
 // 因为unlikely只能在nightly版本的编译器中使用

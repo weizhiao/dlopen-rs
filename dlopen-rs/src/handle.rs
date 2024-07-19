@@ -71,19 +71,17 @@ impl ELFLibrary {
 }
 
 #[derive(Debug, Clone)]
-pub struct ELFHandle {
+#[allow(unused)]
+pub struct ELFInstance {
     pub(crate) inner: ELFLibrary,
-    inner_libs: Arc<Vec<Arc<ELFLibraryInner>>>,
+    needed_libs: Arc<Vec<ELFInstance>>,
 }
 
-impl ELFHandle {
-    pub(crate) fn new(
-        lib: ELFLibrary,
-        inner_libs: Vec<Arc<ELFLibraryInner>>,
-    ) -> ELFHandle {
-        ELFHandle {
+impl ELFInstance {
+    pub(crate) fn new(lib: ELFLibrary, needed_libs: Vec<ELFInstance>) -> ELFInstance {
+        ELFInstance {
             inner: lib,
-            inner_libs: Arc::new(inner_libs),
+            needed_libs: Arc::new(needed_libs),
         }
     }
 
@@ -97,7 +95,7 @@ impl ELFHandle {
     }
 }
 
-impl Drop for ELFHandle {
+impl Drop for ELFInstance {
     fn drop(&mut self) {
         if let Some(fini) = self.inner.fini_fn() {
             fini();

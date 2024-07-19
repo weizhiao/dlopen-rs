@@ -17,13 +17,21 @@ impl GetSymbol for MyLib {
 
 fn main() {
     let path = Path::new("/home/wei/dlopen-rs/target/release/libexample.so");
-    let libexample = ELFLibrary::from_file(path).unwrap();
 
+    let musl = ELFLibrary::from_file("/lib/x86_64-linux-musl/libc.so")
+        .unwrap()
+        .relocate(&[])
+        .unwrap();
     let libc = MyLib(unsafe { Library::new("/lib/x86_64-linux-gnu/libc.so.6").unwrap() });
 
-    let libgcc = ELFLibrary::from_file("/lib/x86_64-linux-gnu/libgcc_s.so.1").unwrap();
-    let libgcc = libgcc.relocate_with(&[], &[], &[&libc]).unwrap();
-    let libexample = libexample.relocate_with(&[], &[&libgcc], &[&libc]).unwrap();
+    let libgcc = ELFLibrary::from_file("/usr/lib/llvm-19/lib/libunwind.so")
+        .unwrap()
+        .relocate_with::<MyLib>(&[&musl], &[])
+        .unwrap();
+    let libexample = ELFLibrary::from_file(path)
+        .unwrap()
+        .relocate_with::<MyLib>(&[&libgcc, &musl], &[])
+        .unwrap();
 
     let f = libexample.get_sym("c_fun_add_two").unwrap();
     let f: extern "C" fn(i32) -> i32 = unsafe { core::mem::transmute(f) };
