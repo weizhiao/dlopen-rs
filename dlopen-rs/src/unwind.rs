@@ -12,9 +12,9 @@ pub struct UnwindInfo {
 
 #[cfg(not(feature = "unwinding"))]
 #[derive(Debug)]
-pub(crate) struct UnwindInfo(usize);
+pub(crate) struct ELFUnwind(usize);
 
-impl Drop for UnwindInfo {
+impl Drop for ELFUnwind {
     #[cfg(feature = "unwinding")]
     fn drop(&mut self) {
         use eh_finder::EH_FINDER;
@@ -23,7 +23,7 @@ impl Drop for UnwindInfo {
         if let Entry::Occupied(entry) = eh_finder.entry(
             self.eh_frame_hdr as u64,
             |val| val.eh_frame_hdr == self.eh_frame_hdr,
-            UnwindInfo::hasher,
+            ELFUnwind::hasher,
         ) {
             let info = entry.remove();
             core::mem::forget(info.0);
@@ -74,8 +74,8 @@ impl Drop for UnwindInfo {
     }
 }
 
-impl UnwindInfo {
-    pub(crate) fn new(phdr: &Phdr, segments: &ELFSegments) -> Result<UnwindInfo> {
+impl ELFUnwind {
+    pub(crate) fn new(phdr: &Phdr, segments: &ELFSegments) -> Result<ELFUnwind> {
         let base = segments.base();
         let eh_frame_hdr_off = phdr.p_vaddr as usize;
         let eh_frame_hdr_size = phdr.p_memsz as usize;
@@ -91,7 +91,7 @@ impl UnwindInfo {
             gimli::Pointer::Direct(x) => x as usize,
             gimli::Pointer::Indirect(x) => unsafe { *(x as *const _) },
         };
-        Ok(UnwindInfo(eh_frame_addr))
+        Ok(ELFUnwind(eh_frame_addr))
     }
 
     #[cfg(all(target_env = "gnu", not(feature = "unwinding")))]
@@ -106,7 +106,7 @@ impl UnwindInfo {
 
     #[cfg(all(not(target_env = "gnu"), not(feature = "unwinding")))]
     #[inline]
-    unsafe fn register_unwind_info(unwind_info: &UnwindInfo) {
+    unsafe fn register_unwind_info(unwind_info: &ELFUnwind) {
         extern "C" {
             fn __register_frame(begin: *const c_void);
         }
@@ -141,20 +141,20 @@ impl UnwindInfo {
 
     #[cfg(feature = "unwinding")]
     #[inline]
-    unsafe fn register_unwind_info(unwind_info: &UnwindInfo) {
+    unsafe fn register_unwind_info(unwind_info: &ELFUnwind) {
         use eh_finder::EH_FINDER;
         use hashbrown::hash_map::DefaultHashBuilder;
 
         EH_FINDER.eh_info.write().insert_unique(
             unwind_info.eh_frame_hdr as u64,
             unwind_info.clone(),
-            UnwindInfo::hasher,
+            ELFUnwind::hasher,
         );
     }
 
     #[cfg(feature = "unwinding")]
     //每个unwind_info的eh_frame_hdr都是不同的
-    fn hasher(val: &UnwindInfo) -> u64 {
+    fn hasher(val: &ELFUnwind) -> u64 {
         val.eh_frame_hdr as u64
     }
 }
@@ -171,7 +171,7 @@ pub(crate) mod eh_finder {
     pub(crate) static mut EH_FINDER: EhFinder = EhFinder::new();
 
     pub(crate) struct EhFinder {
-        pub eh_info: RwLock<HashTable<UnwindInfo>>,
+        pub eh_info: RwLock<HashTable<ELFUnwind>>,
     }
 
     impl EhFinder {

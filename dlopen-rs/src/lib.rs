@@ -37,13 +37,6 @@ extern crate alloc;
 )))]
 compile_error!("unsupport arch");
 
-#[cfg(target_arch = "aarch64")]
-const PAGE_SIZE: usize = 0x10000;
-#[cfg(not(target_arch = "aarch64"))]
-const PAGE_SIZE: usize = 0x1000;
-
-const MASK: usize = (0 - PAGE_SIZE as isize) as usize;
-
 cfg_match! {
     cfg(target_pointer_width = "64")=>{
         const E_CLASS: Class = Class::ELF64;

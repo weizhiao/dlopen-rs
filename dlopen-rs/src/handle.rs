@@ -9,7 +9,7 @@ use elf::string_table::StringTable;
 
 use crate::{
     file::ELFFile, loader::ELFLibraryInner, relocation::ELFRelocation, segment::ELFSegments,
-    ELFSymbol, Result,
+    unwind::ELFUnwind, ELFSymbol, Result,
 };
 
 #[derive(Debug, Clone)]
@@ -32,6 +32,10 @@ impl ELFLibrary {
         Ok(ELFLibrary {
             inner: Arc::new(inner),
         })
+    }
+
+    pub fn needed_libs(&self) -> &Vec<&str> {
+        &self.inner.needed_libs
     }
 
     #[inline]
@@ -82,6 +86,10 @@ impl ELFLibrary {
     #[inline]
     pub(crate) fn fini_array_fn(&self) -> &Option<&'static [extern "C" fn()]> {
         &self.inner.fini_array_fn
+    }
+
+    pub(crate) fn unwind(&self) -> &Option<ELFUnwind> {
+        &self.inner.unwind
     }
 }
 

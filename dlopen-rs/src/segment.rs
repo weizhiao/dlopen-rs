@@ -1,11 +1,51 @@
-use crate::{file::FileType, unlikely, Phdr, Result, MASK, PAGE_SIZE};
+use crate::{file::FileType, unlikely, Phdr, Result};
 use core::ffi::c_void;
 use core::ptr::NonNull;
 
-use elf::abi::{PF_R, PF_W, PF_X};
+use elf::abi::{PF_R, PF_W, PF_X, PT_LOAD};
 use snafu::ResultExt;
 
 use crate::file::ELFFile;
+
+#[cfg(target_arch = "aarch64")]
+const PAGE_SIZE: usize = 0x10000;
+#[cfg(not(target_arch = "aarch64"))]
+const PAGE_SIZE: usize = 0x1000;
+
+const MASK: usize = (0 - PAGE_SIZE as isize) as usize;
+
+#[allow(unused)]
+#[derive(Debug)]
+pub(crate) struct ELFRelro {
+    addr: usize,
+    len: usize,
+}
+
+impl ELFRelro {
+    pub(crate) fn new(phdr: &Phdr, segments: &ELFSegments) -> ELFRelro {
+        ELFRelro {
+            addr: segments.base() + phdr.p_vaddr as usize,
+            len: phdr.p_memsz as usize,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn relro(&self) -> Result<()> {
+        #[cfg(feature = "mmap")]
+        {
+            use crate::ErrnoSnafu;
+            use nix::sys::mman;
+            let end = (self.addr + self.len + PAGE_SIZE - 1) & MASK;
+            let start = self.addr & MASK;
+            let start_addr = unsafe { NonNull::new_unchecked(start as _) };
+            unsafe {
+                mman::mprotect(start_addr, end - start, mman::ProtFlags::PROT_READ)
+                    .context(ErrnoSnafu)?;
+            }
+        }
+        Ok(())
+    }
+}
 
 #[derive(Debug)]
 pub(crate) struct ELFSegments {
@@ -84,26 +124,48 @@ impl ELFSegments {
     }
 
     #[inline]
-    pub(crate) fn new(
-        prot: u32,
-        len: usize,
-        off: usize,
-        addr_min: usize,
-        file: &ELFFile,
-    ) -> Result<ELFSegments> {
+    pub(crate) fn new(phdrs: &[Phdr], file: &ELFFile) -> Result<ELFSegments> {
         use crate::ErrnoSnafu;
         use core::num::NonZeroUsize;
         use nix::sys::mman;
+
+        let mut addr_min = usize::MAX;
+        let mut addr_max = 0;
+        let mut addr_min_off = 0;
+        let mut addr_min_prot = 0;
+
+        for phdr in phdrs {
+            if phdr.p_type == PT_LOAD {
+                let addr_start = phdr.p_vaddr as usize;
+                let addr_end = (phdr.p_vaddr + phdr.p_memsz) as usize;
+                if addr_start < addr_min {
+                    addr_min = addr_start;
+                    addr_min_off = phdr.p_offset as usize;
+                    addr_min_prot = phdr.p_flags;
+                }
+                if addr_end > addr_max {
+                    addr_max = addr_end;
+                }
+            }
+        }
+
+        addr_max += PAGE_SIZE - 1;
+        addr_max &= MASK;
+        addr_min &= MASK as usize;
+        addr_min_off &= MASK;
+
+        let len = addr_max - addr_min;
+
         let len = NonZeroUsize::new(len).unwrap();
         let memory = match &file.context {
             FileType::Fd(file) => unsafe {
                 mman::mmap(
                     None,
                     len,
-                    ELFSegments::map_prot(prot),
+                    ELFSegments::map_prot(addr_min_prot),
                     mman::MapFlags::MAP_PRIVATE,
                     file,
-                    off as _,
+                    addr_min_off as _,
                 )
                 .context(ErrnoSnafu)?
             },

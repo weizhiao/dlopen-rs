@@ -1,54 +1,19 @@
 use crate::arch::*;
+use crate::segment::ELFRelro;
 use crate::{
     builtin::BUILTIN,
     elfloader_error,
     handle::{ELFInstance, ELFLibrary},
     parse_err_convert,
-    segment::ELFSegments,
-    Error, Phdr, Rela, Result, MASK, PAGE_SIZE, REL_BIT, REL_MASK,
+    Error, Rela, Result, REL_BIT, REL_MASK,
 };
-use core::ptr::NonNull;
 use elf::abi::*;
-use snafu::ResultExt;
 
 #[derive(Debug)]
 pub(crate) struct ELFRelocation {
     pub(crate) pltrel: Option<&'static [Rela]>,
     pub(crate) rel: Option<&'static [Rela]>,
     pub(crate) relro: Option<ELFRelro>,
-}
-
-#[allow(unused)]
-#[derive(Debug)]
-pub(crate) struct ELFRelro {
-    addr: usize,
-    len: usize,
-}
-
-impl ELFRelro {
-    pub(crate) fn new(phdr: &Phdr, segments: &ELFSegments) -> ELFRelro {
-        ELFRelro {
-            addr: segments.base() + phdr.p_vaddr as usize,
-            len: phdr.p_memsz as usize,
-        }
-    }
-
-    #[inline]
-    fn relro(&self) -> Result<()> {
-        #[cfg(feature = "mmap")]
-        {
-            use crate::ErrnoSnafu;
-            use nix::sys::mman;
-            let end = (self.addr + self.len + PAGE_SIZE - 1) & MASK;
-            let start = self.addr & MASK;
-            let start_addr = unsafe { NonNull::new_unchecked(start as _) };
-            unsafe {
-                mman::mprotect(start_addr, end - start, mman::ProtFlags::PROT_READ)
-                    .context(ErrnoSnafu)?;
-            }
-        }
-        Ok(())
-    }
 }
 
 pub trait GetSymbol {
@@ -212,6 +177,10 @@ impl ELFLibrary {
 
         if let Some(relro) = &self.relocation().relro {
             relro.relro()?;
+        }
+
+		if let Some(unwind_info) = self.unwind() {
+            unwind_info.register_unwind_info();
         }
 
         let mut needed = vec![];
