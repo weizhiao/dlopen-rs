@@ -1,10 +1,15 @@
-use std::{ffi::OsStr, sync::Arc};
+use std::{
+    ffi::OsStr,
+    marker::{self, PhantomData},
+    ops,
+    sync::Arc,
+};
 
 use elf::string_table::StringTable;
 
 use crate::{
     file::ELFFile, loader::ELFLibraryInner, relocation::ELFRelocation, segment::ELFSegments,
-    Result, Symbol,
+    ELFSymbol, Result,
 };
 
 #[derive(Debug, Clone)]
@@ -29,42 +34,52 @@ impl ELFLibrary {
         })
     }
 
-    pub(crate) fn get_sym(&self, name: &str) -> Option<&Symbol> {
+    #[inline]
+    pub(crate) fn get_sym(&self, name: &str) -> Option<&ELFSymbol> {
         self.inner.get_sym(name)
     }
 
+    #[inline]
     pub(crate) fn relocation(&self) -> &ELFRelocation {
         &self.inner.relocation
     }
 
-    pub(crate) fn symtab(&self) -> *const Symbol {
+    #[inline]
+    pub(crate) fn symtab(&self) -> *const ELFSymbol {
         self.inner.symtab
     }
 
+    #[inline]
     pub(crate) fn strtab(&self) -> &StringTable {
         &self.inner.strtab
     }
 
+    #[inline]
     pub(crate) fn segments(&self) -> &ELFSegments {
         &self.inner.segments
     }
 
+    #[inline]
     pub(crate) fn tls(&self) -> &Option<Box<crate::tls::ELFTLS>> {
         &self.inner.tls
     }
 
+    #[inline]
     pub(crate) fn init_fn(&self) -> &Option<extern "C" fn()> {
         &self.inner.init_fn
     }
 
+    #[inline]
     pub(crate) fn init_array_fn(&self) -> &Option<&'static [extern "C" fn()]> {
         &self.inner.init_array_fn
     }
 
+    #[inline]
     pub(crate) fn fini_fn(&self) -> &Option<extern "C" fn()> {
         &self.inner.fini_fn
     }
 
+    #[inline]
     pub(crate) fn fini_array_fn(&self) -> &Option<&'static [extern "C" fn()]> {
         &self.inner.fini_array_fn
     }
@@ -85,12 +100,19 @@ impl ELFInstance {
         }
     }
 
-    pub fn get_sym(&self, name: &str) -> Option<*const ()> {
+    pub(crate) fn get_sym(&self, name: &str) -> Option<*const ()> {
         self.inner.get_sym(name).map(|sym| unsafe {
             self.inner
                 .segments()
                 .as_mut_ptr()
                 .add(sym.st_value as usize) as *const ()
+        })
+    }
+
+    pub fn get<'lib, T>(&'lib self, name: &str) -> Option<Symbol<'lib, T>> {
+        self.get_sym(name).map(|sym| Symbol {
+            ptr: sym as _,
+            pd: PhantomData,
         })
     }
 }
@@ -105,5 +127,18 @@ impl Drop for ELFInstance {
                 fini();
             }
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct Symbol<'lib, T: 'lib> {
+    ptr: *mut (),
+    pd: marker::PhantomData<&'lib T>,
+}
+
+impl<'lib, T> ops::Deref for Symbol<'lib, T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        unsafe { &*(&self.ptr as *const *mut _ as *const T) }
     }
 }

@@ -7,7 +7,7 @@ use crate::{
     segment::ELFSegments,
     unlikely,
     unwind::UnwindInfo,
-    Result, Symbol, MASK, PAGE_SIZE,
+    Result, ELFSymbol, MASK, PAGE_SIZE,
 };
 use elf::abi::*;
 
@@ -16,7 +16,7 @@ use elf::abi::*;
 pub(crate) struct ELFLibraryInner {
     pub(crate) hashtab: ELFHashTable,
     //.dynsym
-    pub(crate) symtab: *const Symbol,
+    pub(crate) symtab: *const ELFSymbol,
     //.dynstr
     pub(crate) strtab: elf::string_table::StringTable<'static>,
     // 保存unwind信息,UnwindInfo一定要先于ELFMemory drop,
@@ -36,7 +36,7 @@ pub(crate) struct ELFLibraryInner {
 }
 
 impl ELFLibraryInner {
-    pub(crate) fn get_sym(&self, name: &str) -> Option<&Symbol> {
+    pub(crate) fn get_sym(&self, name: &str) -> Option<&ELFSymbol> {
         let bytes = name.as_bytes();
         let name = if *bytes.last().unwrap() == 0 {
             &bytes[..bytes.len() - 1]

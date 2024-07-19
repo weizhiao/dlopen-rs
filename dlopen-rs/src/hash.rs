@@ -1,4 +1,4 @@
-use crate::{unlikely, Symbol};
+use crate::{unlikely, ELFSymbol};
 use elf::string_table::StringTable;
 
 #[derive(Debug)]
@@ -10,9 +10,9 @@ impl ELFHashTable {
     pub(crate) unsafe fn find(
         &self,
         name: &[u8],
-        symtab: *const Symbol,
+        symtab: *const ELFSymbol,
         strtab: &StringTable<'static>,
-    ) -> Option<&Symbol> {
+    ) -> Option<&ELFSymbol> {
         match self {
             ELFHashTable::Gnu(hash_table) => hash_table.find(name, symtab, strtab),
         }
@@ -95,9 +95,9 @@ impl ELFGnuHash {
     pub(crate) unsafe fn find(
         &self,
         name: &[u8],
-        symtab: *const Symbol,
+        symtab: *const ELFSymbol,
         strtab: &StringTable<'static>,
-    ) -> Option<&Symbol> {
+    ) -> Option<&ELFSymbol> {
         let hash = ELFGnuHash::gnu_hash(name);
         let table_start_idx = self.table_start_idx as usize;
         let chain_start_idx = self

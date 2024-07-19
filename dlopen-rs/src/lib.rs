@@ -14,7 +14,7 @@ mod segment;
 mod tls;
 mod unwind;
 
-pub use handle::{ELFInstance, ELFLibrary};
+pub use handle::{ELFInstance, ELFLibrary, Symbol};
 pub use relocation::GetSymbol;
 
 // 因为unlikely只能在nightly版本的编译器中使用
@@ -50,7 +50,7 @@ cfg_match! {
         type Phdr = elf::segment::Elf64_Phdr;
         type Dyn = elf::dynamic::Elf64_Dyn;
         type Rela = elf::relocation::Elf64_Rela;
-        type Symbol = elf::symbol::Elf64_Sym;
+        type ELFSymbol = elf::symbol::Elf64_Sym;
         const REL_MASK: usize = 0xFFFFFFFF;
         const REL_BIT: usize = 32;
         const PHDR_SIZE: usize = core::mem::size_of::<elf::segment::Elf64_Phdr>();
@@ -61,7 +61,7 @@ cfg_match! {
         type Phdr = elf::segment::Elf32_Phdr;
         type Dyn = elf::dynamic::Elf32_Dyn;
         type Rela = elf::relocation::Elf32_Rela;
-        type Symbol = elf::symbol::Elf32_Sym;
+        type ELFSymbol = elf::symbol::Elf32_Sym;
         const REL_MASK: usize = 0xFF;
         const REL_BIT: usize = 8;
         const PHDR_SIZE: usize = core::mem::size_of::<elf::segment::Elf32_Phdr>();

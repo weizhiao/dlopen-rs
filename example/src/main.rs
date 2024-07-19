@@ -1,5 +1,5 @@
 use dlopen_rs::{ELFLibrary, GetSymbol};
-use libloading::Library;
+use libloading::{Library, Symbol};
 use std::path::Path;
 
 struct MyLib(Library);
@@ -16,7 +16,8 @@ impl GetSymbol for MyLib {
 }
 
 fn main() {
-    let path = Path::new("/home/wei/dlopen-rs/target/x86_64-unknown-linux-musl/release/libexample.so");
+    let path =
+        Path::new("/home/wei/dlopen-rs/target/x86_64-unknown-linux-musl/release/libexample.so");
 
     let libc = MyLib(unsafe { Library::new("/lib/x86_64-linux-gnu/libc.so.6").unwrap() });
 
@@ -29,13 +30,13 @@ fn main() {
         .relocate_with::<MyLib>(&[&libgcc], &[&libc])
         .unwrap();
 
-    let f = libexample.get_sym("c_fun_add_two").unwrap();
-    let f: extern "C" fn(i32) -> i32 = unsafe { core::mem::transmute(f) };
+    let f: dlopen_rs::Symbol<extern "C" fn(i32) -> i32> = libexample.get("c_fun_add_two").unwrap();
     println!("{}", f(2));
-    let g = libexample.get_sym("c_fun_print_something_else").unwrap();
-    let g: extern "C" fn() = unsafe { core::mem::transmute(g) };
+	
+    let g: dlopen_rs::Symbol<extern "C" fn()> =
+        libexample.get("c_fun_print_something_else").unwrap();
     g();
-    let f = libexample.get_sym("c_test").unwrap();
-    let f: extern "C" fn() = unsafe { core::mem::transmute(f) };
+	
+    let f: dlopen_rs::Symbol<extern "C" fn()> = libexample.get("c_test").unwrap();
     f();
 }
