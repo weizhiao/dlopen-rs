@@ -5,53 +5,13 @@ use crate::{
     hash::ELFHashTable,
     relocation::ELFRelocation,
     segment::{ELFRelro, ELFSegments},
+    types::{CommonInner, ELFLibraryInner},
     unwind::ELFUnwind,
-    ELFSymbol, Result,
+    Result,
 };
 use elf::abi::*;
 
-#[derive(Debug)]
-#[allow(unused)]
-pub(crate) struct ELFLibraryInner {
-    /// .gnu.hash
-    pub(crate) hashtab: ELFHashTable,
-    /// .dynsym
-    pub(crate) symtab: *const ELFSymbol,
-    /// .dynstr
-    pub(crate) strtab: elf::string_table::StringTable<'static>,
-    /// .eh_frame
-    pub(crate) unwind: Option<ELFUnwind>,
-    /// semgents
-    pub(crate) segments: ELFSegments,
-    /// rela.dyn and rela.plt
-    pub(crate) relocation: ELFRelocation,
-    /// .init
-    pub(crate) init_fn: Option<extern "C" fn()>,
-    /// .init_array
-    pub(crate) init_array_fn: Option<&'static [extern "C" fn()]>,
-    /// .fini
-    pub(crate) fini_fn: Option<extern "C" fn()>,
-    /// .fini_array
-    pub(crate) fini_array_fn: Option<&'static [extern "C" fn()]>,
-    /// needed libs' name
-    pub(crate) needed_libs: Vec<&'static str>,
-    /// .tbss and .tdata
-    #[cfg(feature = "tls")]
-    pub(crate) tls: Option<Box<crate::tls::ELFTLS>>,
-}
-
 impl ELFLibraryInner {
-    pub(crate) fn get_sym(&self, name: &str) -> Option<&ELFSymbol> {
-        let bytes = name.as_bytes();
-        let name = if *bytes.last().unwrap() == 0 {
-            &bytes[..bytes.len() - 1]
-        } else {
-            bytes
-        };
-        let symbol = unsafe { self.hashtab.find(name, self.symtab, &self.strtab) };
-        symbol
-    }
-
     pub(crate) fn load_library(mut file: ELFFile) -> Result<ELFLibraryInner> {
         #[cfg(feature = "std")]
         let mut buf = Buf::new();
@@ -127,19 +87,21 @@ impl ELFLibraryInner {
         let symtab = dynamics.dynsym() as _;
 
         let elf_lib = ELFLibraryInner {
-            segments,
-            hashtab,
-            symtab,
-            strtab,
-            unwind,
+            common: CommonInner {
+                hashtab,
+                symtab,
+                strtab,
+                unwind,
+                segments,
+                fini_fn: dynamics.fini_fn(),
+                fini_array_fn: dynamics.fini_array_fn(),
+                #[cfg(feature = "tls")]
+                tls,
+            },
             relocation,
             init_fn: dynamics.init_fn(),
             init_array_fn: dynamics.init_array_fn(),
-            fini_fn: dynamics.fini_fn(),
-            fini_array_fn: dynamics.fini_array_fn(),
             needed_libs,
-            #[cfg(feature = "tls")]
-            tls,
         };
         Ok(elf_lib)
     }

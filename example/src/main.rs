@@ -1,5 +1,5 @@
 use dlopen_rs::{ELFLibrary, GetSymbol};
-use libloading::{Library, Symbol};
+use libloading::Library;
 use std::path::Path;
 
 struct MyLib(Library);
@@ -32,11 +32,11 @@ fn main() {
 
     let f: dlopen_rs::Symbol<extern "C" fn(i32) -> i32> = libexample.get("c_fun_add_two").unwrap();
     println!("{}", f(2));
-	
+
     let g: dlopen_rs::Symbol<extern "C" fn()> =
         libexample.get("c_fun_print_something_else").unwrap();
     g();
-	
+
     let f: dlopen_rs::Symbol<extern "C" fn()> = libexample.get("c_test").unwrap();
     f();
 }

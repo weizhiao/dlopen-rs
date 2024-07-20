@@ -3,7 +3,7 @@ use crate::segment::ELFRelro;
 use crate::{
     builtin::BUILTIN,
     elfloader_error,
-    handle::{ELFInstance, ELFLibrary},
+    types::{RelocatedLibrary, ELFLibrary},
     parse_err_convert,
     Error, Rela, Result, REL_BIT, REL_MASK,
 };
@@ -21,7 +21,7 @@ pub trait GetSymbol {
 }
 
 impl ELFLibrary {
-    pub fn relocate(self, inner_libs: &[&ELFInstance]) -> Result<ELFInstance> {
+    pub fn relocate(self, inner_libs: &[&RelocatedLibrary]) -> Result<RelocatedLibrary> {
         struct Dump;
         impl GetSymbol for Dump {
             #[cold]
@@ -34,9 +34,9 @@ impl ELFLibrary {
 
     pub fn relocate_with<T>(
         self,
-        inner_libs: &[&ELFInstance],
+        inner_libs: &[&RelocatedLibrary],
         extern_libs: &[&T],
-    ) -> Result<ELFInstance>
+    ) -> Result<RelocatedLibrary>
     where
         T: GetSymbol,
     {
@@ -186,6 +186,6 @@ impl ELFLibrary {
         let mut needed = vec![];
         needed.extend(inner_libs.iter().map(|lib| (*lib).clone()));
 
-        Ok(ELFInstance::new(self, needed))
+        Ok(RelocatedLibrary::new(self, needed))
     }
 }

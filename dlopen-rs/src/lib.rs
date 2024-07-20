@@ -5,7 +5,7 @@ mod builtin;
 mod dynamic;
 mod ehdr;
 mod file;
-mod handle;
+mod types;
 mod hash;
 mod loader;
 mod relocation;
@@ -14,7 +14,7 @@ mod segment;
 mod tls;
 mod unwind;
 
-pub use handle::{ELFInstance, ELFLibrary, Symbol};
+pub use types::{RelocatedLibrary, ELFLibrary, Symbol};
 pub use relocation::GetSymbol;
 
 // 因为unlikely只能在nightly版本的编译器中使用
