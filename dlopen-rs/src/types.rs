@@ -1,5 +1,6 @@
 use std::{
     ffi::OsStr,
+    fmt::Debug,
     marker::{self, PhantomData},
     ops,
     sync::Arc,
@@ -127,6 +128,8 @@ impl ELFLibrary {
 struct RelocatedLibraryInner {
     common: CommonInner,
     needed_libs: Vec<RelocatedLibrary>,
+	/// only one extern lib can be used
+    extern_lib: Option<Box<dyn ExternLibrary>>,
 }
 
 #[derive(Debug, Clone)]
@@ -135,10 +138,15 @@ pub struct RelocatedLibrary {
 }
 
 impl RelocatedLibrary {
-    pub(crate) fn new(lib: ELFLibrary, needed_libs: Vec<RelocatedLibrary>) -> RelocatedLibrary {
+    pub(crate) fn new(
+        lib: ELFLibrary,
+        needed_libs: Vec<RelocatedLibrary>,
+        extern_lib: Option<Box<dyn ExternLibrary>>,
+    ) -> RelocatedLibrary {
         let inner = RelocatedLibraryInner {
             common: lib.inner.common,
             needed_libs,
+            extern_lib,
         };
 
         RelocatedLibrary {
@@ -175,6 +183,11 @@ impl Drop for RelocatedLibrary {
             }
         }
     }
+}
+
+pub trait ExternLibrary: Debug {
+    /// get lib's symbol
+    fn get_sym(&self, name: &str) -> Option<*const ()>;
 }
 
 #[derive(Debug)]

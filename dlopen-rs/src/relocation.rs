@@ -1,10 +1,10 @@
 use crate::arch::*;
 use crate::segment::ELFRelro;
+use crate::types::ExternLibrary;
 use crate::{
     builtin::BUILTIN,
-    elfloader_error,
-    types::{RelocatedLibrary, ELFLibrary},
-    parse_err_convert,
+    elfloader_error, parse_err_convert,
+    types::{ELFLibrary, RelocatedLibrary},
     Error, Rela, Result, REL_BIT, REL_MASK,
 };
 use elf::abi::*;
@@ -16,29 +16,26 @@ pub(crate) struct ELFRelocation {
     pub(crate) relro: Option<ELFRelro>,
 }
 
-pub trait GetSymbol {
-    fn get_sym(&self, name: &str) -> Option<*const ()>;
-}
-
 impl ELFLibrary {
-    pub fn relocate(self, inner_libs: &[&RelocatedLibrary]) -> Result<RelocatedLibrary> {
+    pub fn relocate(self, inner_libs: &[RelocatedLibrary]) -> Result<RelocatedLibrary> {
+        #[derive(Debug)]
         struct Dump;
-        impl GetSymbol for Dump {
+        impl ExternLibrary for Dump {
             #[cold]
             fn get_sym(&self, _name: &str) -> Option<*const ()> {
                 None
             }
         }
-        self.relocate_with::<Dump>(inner_libs, &[])
+        self.relocate_with::<Dump>(inner_libs, None)
     }
 
     pub fn relocate_with<T>(
         self,
-        inner_libs: &[&RelocatedLibrary],
-        extern_libs: &[&T],
+        inner_libs: &[RelocatedLibrary],
+        extern_lib: Option<T>,
     ) -> Result<RelocatedLibrary>
     where
-        T: GetSymbol,
+        T: ExternLibrary + 'static,
     {
         let pltrel = if let Some(pltrel) = self.relocation().pltrel {
             pltrel.iter()
@@ -89,16 +86,14 @@ impl ELFLibrary {
                                     });
                                 }
 
-                                for lib in inner_libs {
+                                for lib in inner_libs.iter() {
                                     if let Some(sym) = lib.get_sym(name) {
                                         return Some(sym);
                                     }
                                 }
 
-                                for lib in extern_libs {
-                                    if let Some(sym) = lib.get_sym(name) {
-                                        return Some(sym);
-                                    }
+                                if let Some(lib) = extern_lib.as_ref() {
+                                    return lib.get_sym(name);
                                 }
 
                                 None
@@ -179,13 +174,12 @@ impl ELFLibrary {
             relro.relro()?;
         }
 
-		if let Some(unwind_info) = self.unwind() {
+        if let Some(unwind_info) = self.unwind() {
             unwind_info.register_unwind_info();
         }
 
-        let mut needed = vec![];
-        needed.extend(inner_libs.iter().map(|lib| (*lib).clone()));
+        let extern_lib = extern_lib.map(|lib| Box::new(lib) as Box<dyn ExternLibrary>);
 
-        Ok(RelocatedLibrary::new(self, needed))
+        Ok(RelocatedLibrary::new(self, inner_libs.to_vec(), extern_lib))
     }
 }

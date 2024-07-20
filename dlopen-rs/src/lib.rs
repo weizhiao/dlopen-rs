@@ -5,17 +5,16 @@ mod builtin;
 mod dynamic;
 mod ehdr;
 mod file;
-mod types;
 mod hash;
 mod loader;
 mod relocation;
 mod segment;
 #[cfg(feature = "tls")]
 mod tls;
+mod types;
 mod unwind;
 
-pub use types::{RelocatedLibrary, ELFLibrary, Symbol};
-pub use relocation::GetSymbol;
+pub use types::{ELFLibrary, ExternLibrary, RelocatedLibrary, Symbol};
 
 // 因为unlikely只能在nightly版本的编译器中使用
 #[cfg(not(feature = "nightly"))]

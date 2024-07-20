@@ -1,10 +1,11 @@
-use dlopen_rs::{ELFLibrary, GetSymbol};
+use dlopen_rs::{ELFLibrary, ExternLibrary};
 use libloading::Library;
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
-struct MyLib(Library);
+#[derive(Debug, Clone)]
+struct MyLib(Arc<Library>);
 
-impl GetSymbol for MyLib {
+impl ExternLibrary for MyLib {
     fn get_sym(&self, name: &str) -> Option<*const ()> {
         let sym: Option<*const ()> = unsafe {
             self.0
@@ -19,15 +20,17 @@ fn main() {
     let path =
         Path::new("/home/wei/dlopen-rs/target/x86_64-unknown-linux-musl/release/libexample.so");
 
-    let libc = MyLib(unsafe { Library::new("/lib/x86_64-linux-gnu/libc.so.6").unwrap() });
+    let libc = MyLib(Arc::new(unsafe {
+        Library::new("/lib/x86_64-linux-gnu/libc.so.6").unwrap()
+    }));
 
     let libgcc = ELFLibrary::from_file("/usr/lib/llvm-19/lib/libunwind.so")
         .unwrap()
-        .relocate_with::<MyLib>(&[], &[&libc])
+        .relocate_with::<MyLib>(&[], Some(libc.clone()))
         .unwrap();
     let libexample = ELFLibrary::from_file(path)
         .unwrap()
-        .relocate_with::<MyLib>(&[&libgcc], &[&libc])
+        .relocate_with::<MyLib>(&[libgcc], Some(libc))
         .unwrap();
 
     let f: dlopen_rs::Symbol<extern "C" fn(i32) -> i32> = libexample.get("c_fun_add_two").unwrap();
