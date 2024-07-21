@@ -2,7 +2,7 @@ use crate::{
     dynamic::ELFDynamic,
     elfloader_error,
     file::{Buf, ELFFile},
-    hash::ELFHashTable,
+    hashtable::ELFHashTable,
     relocation::ELFRelocation,
     segment::{ELFRelro, ELFSegments},
     types::{CommonInner, ELFLibraryInner},
@@ -61,7 +61,7 @@ impl ELFLibraryInner {
         let dynamics = if let Some(dynamics) = dynamics {
             dynamics
         } else {
-            return elfloader_error("elf file does not have dynamic");
+            return elfloader_error("elf file does not have dynamic".to_string());
         }?;
 
         #[cfg(feature = "unwinding")]

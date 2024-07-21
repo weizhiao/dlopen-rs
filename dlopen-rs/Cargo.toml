@@ -2,6 +2,10 @@
 name = "dlopen-rs"
 version = "0.1.0"
 edition = "2021"
+readme = "README.md"
+
+[dev-dependencies]
+libloading = "0.8.0"
 
 [dependencies.unwinding]
 version = "0.2.1"

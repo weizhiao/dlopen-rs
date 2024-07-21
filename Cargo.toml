@@ -1,5 +1,6 @@
 [workspace]
-resolver = "2"
 members = [
-	'dlopen-rs', "example", "example-dylib",
+    "dlopen-rs",
+    "example-dylib",
 ]
+resolver = "2"

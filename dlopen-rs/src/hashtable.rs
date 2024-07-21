@@ -24,7 +24,7 @@ impl ELFHashTable {
 }
 
 #[derive(Debug)]
-struct ELFGnuHash {
+pub(crate) struct ELFGnuHash {
     //不使用bloom，因此也就不保存bloom的信息
     nbucket: u32,
     table_start_idx: u32,

@@ -147,7 +147,7 @@ impl ELFLibrary {
                     // 实现它需要对要libc做修改，因为它要使用tp来访问thread local，
                     // 而线程栈里保存的东西完全是由libc控制的
 
-                    return elfloader_error("unsupport relocate type");
+                    return elfloader_error(format!("unsupport relocate type {}", r_type));
                 }
             }
 

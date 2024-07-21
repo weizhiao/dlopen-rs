@@ -40,6 +40,6 @@ fn main() {
         libexample.get("c_fun_print_something_else").unwrap();
     g();
 
-    let f: dlopen_rs::Symbol<extern "C" fn()> = libexample.get("c_test").unwrap();
+    let f: dlopen_rs::Symbol<extern "C" fn()> = libexample.get("c_func_thread_local").unwrap();
     f();
 }

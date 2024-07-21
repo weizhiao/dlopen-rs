@@ -15,7 +15,7 @@ thread_local! {
 }
 
 #[no_mangle]
-pub extern "C" fn c_test() {
+pub extern "C" fn c_func_thread_local() {
     let handle=thread::spawn(|| {
         NUM.set(1);
         println!("{}", NUM.get());

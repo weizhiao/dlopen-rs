@@ -54,6 +54,16 @@ pub(crate) struct ELFSegments {
     len: usize,
 }
 
+impl ELFSegments {
+    pub(crate) fn dump(addr: usize) -> ELFSegments {
+        ELFSegments {
+            memory: unsafe { NonNull::new_unchecked(addr as *mut _) },
+            addr_min: 0,
+            len: isize::MAX as _,
+        }
+    }
+}
+
 #[cfg(not(feature = "mmap"))]
 impl Drop for ELFSegments {
     fn drop(&mut self) {
@@ -65,8 +75,10 @@ impl Drop for ELFSegments {
 impl Drop for ELFSegments {
     fn drop(&mut self) {
         use nix::sys::mman;
-        unsafe {
-            mman::munmap(self.memory, self.len).unwrap();
+        if self.len != isize::MAX as _ {
+            unsafe {
+                mman::munmap(self.memory, self.len).unwrap();
+            }
         }
     }
 }

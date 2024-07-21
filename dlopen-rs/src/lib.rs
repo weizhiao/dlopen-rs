@@ -5,7 +5,8 @@ mod builtin;
 mod dynamic;
 mod ehdr;
 mod file;
-mod hash;
+mod hashtable;
+mod load_self;
 mod loader;
 mod relocation;
 mod segment;
@@ -84,9 +85,12 @@ pub enum Error {
     },
     #[snafu(display("Can't parse file, {msg}"))]
     LoaderError {
-        msg: &'static str,
+        msg: String,
     },
     RelocateError {
+        msg: String,
+    },
+    FindSymbolError {
         msg: String,
     },
     #[snafu(display("Unknown Error"))]
@@ -114,7 +118,7 @@ fn gimli_err_convert(err: gimli::Error) -> Error {
 
 #[cold]
 #[inline(never)]
-fn elfloader_error<T>(msg: &'static str) -> Result<T> {
+fn elfloader_error<T>(msg: String) -> Result<T> {
     Err(Error::LoaderError { msg })
 }
 

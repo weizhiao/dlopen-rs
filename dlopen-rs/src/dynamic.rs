@@ -67,19 +67,19 @@ impl ELFDynamic {
         let hash_off = if let Some(hash_off) = hash_off {
             hash_off + base
         } else {
-            return elfloader_error("dynamic section does not have DT_GNU_HASH");
+            return elfloader_error("dynamic section does not have DT_GNU_HASH".to_string());
         };
 
         let symtab_off = if let Some(symtab_off) = symtab_off {
             symtab_off + base
         } else {
-            return elfloader_error("dynamic section does not have DT_SYMTAB");
+            return elfloader_error("dynamic section does not have DT_SYMTAB".to_string());
         };
 
         let strtab = if let Some(strtab_off) = strtab_off {
             &segments.as_mut_slice()[strtab_off..strtab_off + strtab_size.unwrap()]
         } else {
-            return elfloader_error("dynamic section does not have DT_STRTAB");
+            return elfloader_error("dynamic section does not have DT_STRTAB".to_string());
         };
 
         let pltrel = if let Some(pltrel_off) = pltrel_off {

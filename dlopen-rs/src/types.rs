@@ -9,8 +9,8 @@ use std::{
 use elf::string_table::StringTable;
 
 use crate::{
-    file::ELFFile, hash::ELFHashTable, relocation::ELFRelocation, segment::ELFSegments,
-    unwind::ELFUnwind, ELFSymbol, Result,
+    file::ELFFile, hashtable::ELFHashTable, relocation::ELFRelocation, segment::ELFSegments,
+    unwind::ELFUnwind, ELFSymbol, Error, Result,
 };
 
 #[derive(Debug)]
@@ -125,16 +125,16 @@ impl ELFLibrary {
 
 #[derive(Debug)]
 #[allow(unused)]
-struct RelocatedLibraryInner {
-    common: CommonInner,
-    needed_libs: Vec<RelocatedLibrary>,
-	/// only one extern lib can be used
-    extern_lib: Option<Box<dyn ExternLibrary>>,
+pub(crate) struct RelocatedLibraryInner {
+    pub(crate) common: CommonInner,
+    pub(crate) needed_libs: Vec<RelocatedLibrary>,
+    /// only one extern lib can be used
+    pub(crate) extern_lib: Option<Box<dyn ExternLibrary>>,
 }
 
 #[derive(Debug, Clone)]
 pub struct RelocatedLibrary {
-    inner: Arc<RelocatedLibraryInner>,
+    pub(crate) inner: Arc<RelocatedLibraryInner>,
 }
 
 impl RelocatedLibrary {
@@ -164,11 +164,15 @@ impl RelocatedLibrary {
         })
     }
 
-    pub fn get<'lib, T>(&'lib self, name: &str) -> Option<Symbol<'lib, T>> {
-        self.get_sym(name).map(|sym| Symbol {
-            ptr: sym as _,
-            pd: PhantomData,
-        })
+    pub fn get<'lib, T>(&'lib self, name: &str) -> Result<Symbol<'lib, T>> {
+        self.get_sym(name)
+            .map(|sym| Symbol {
+                ptr: sym as _,
+                pd: PhantomData,
+            })
+            .ok_or(Error::FindSymbolError {
+                msg: format!("can not find symbol:{}", name),
+            })
     }
 }
 
