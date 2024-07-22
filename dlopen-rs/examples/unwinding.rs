@@ -1,17 +1,14 @@
-use std::path::Path;
 use dlopen_rs::ELFLibrary;
+use std::path::Path;
 
 fn main() {
-    let path =
-        Path::new("/home/wei/dlopen-rs/target/release/libexample.so");
+    let path = Path::new("/home/wei/dlopen-rs/target/release/libexample.so");
 
     let libc = ELFLibrary::load_self("libc").unwrap();
-    let libgcc = ELFLibrary::load_self("libgcc")
-        .unwrap();
 
     let libexample = ELFLibrary::from_file(path)
         .unwrap()
-        .relocate(&[libgcc, libc])
+        .relocate(&[libc])
         .unwrap();
 
     let f: dlopen_rs::Symbol<extern "C" fn(i32) -> i32> = libexample.get("c_fun_add_two").unwrap();

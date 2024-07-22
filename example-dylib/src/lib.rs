@@ -10,19 +10,28 @@ use std::{
     thread,
 };
 
+#[no_mangle]
+pub extern "C-unwind" fn c_func_panic() {
+    let res = std::panic::catch_unwind(|| {
+        panic!("panic!");
+    });
+    assert!(res.is_err());
+    println!("catch panic!")
+}
+
 thread_local! {
     static NUM:Cell<i32>=Cell::new(0)
 }
 
 #[no_mangle]
 pub extern "C" fn c_func_thread_local() {
-    let handle=thread::spawn(|| {
-        NUM.set(1);
-        println!("{}", NUM.get());
+    let handle = thread::spawn(|| {
+        NUM.set(NUM.get() + 1);
+        println!("thread1:{}", NUM.get());
     });
-	handle.join().unwrap();
-	NUM.set(2);
-	println!("{}", NUM.get());
+    handle.join().unwrap();
+    NUM.set(NUM.get() + 2);
+    println!("thread2:{}", NUM.get());
 }
 
 //FUNCTIONS

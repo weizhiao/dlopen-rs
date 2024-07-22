@@ -7,10 +7,16 @@ readme = "README.md"
 [dev-dependencies]
 libloading = "0.8.0"
 
+[dependencies.spin]
+version = "0.9.8"
+default-features = false
+features = ["rwlock"]
+optional = true
+
 [dependencies.unwinding]
 version = "0.2.1"
 default-features = false
-features = ["hide-trace", "dwarf-expr", "fde-custom", "panic", "unwinder"]
+features = ["fde-custom", "unwinder"]
 optional = true
 
 [dependencies.gimli]
@@ -31,7 +37,7 @@ features = ['rust_1_61', 'unstable-core-error']
 [dependencies.nix]
 version = '0.29'
 default-features = false
-features = ['mman', 'signal']
+features = ['mman']
 optional = true
 
 [dependencies.phf]
@@ -39,16 +45,31 @@ version = '0.11'
 default-features = false
 features = ['macros']
 
-[dependencies]
-elf = { version = "0.7.4", default-features = false }
+[dependencies.elf]
+version = "0.7.4"
+default-features = false
 
 [features]
-default = ["load_self","libgcc","tls","mmap"]
+default = ["load_self", "tls", "mmap", "libgcc"]
+
+# enable load the dso of the program itself
 load_self = ["std", "dep:nix"]
+# enable std
 std = []
+# enable this on platforms that support mmap
 mmap = ["dep:nix", "std"]
+# enable thread local storage
 tls = []
 nightly = []
-unwinding = ["dep:unwinding"]
+# enable this when you want to use the exception handling mechanism provided by dlopen-rs
+unwinding = ["dep:unwinding", "dep:spin"]
+# enable this when program uses libgcc to handle exceptions
 libgcc = []
+# enable this when program uses libunwind to handle exceptions
 libunwind = []
+# see https://github.com/nbdd0121/unwinding/#unwinder
+fde-phdr-dl = ["unwinding?/fde-phdr-dl"]
+# see https://github.com/nbdd0121/unwinding/#baremetal
+fde-static = ["unwinding?/fde-static"]
+# see https://github.com/nbdd0121/unwinding/#baremetal
+fde-gnu-eh-frame-hdr = ["unwinding?/fde-gnu-eh-frame-hdr"]

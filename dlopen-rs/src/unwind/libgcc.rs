@@ -1,5 +1,7 @@
 use std::ffi::c_void;
 
+use crate::segment::ELFSegments;
+
 use super::ELFUnwind;
 
 impl Drop for ELFUnwind {
@@ -12,8 +14,8 @@ impl Drop for ELFUnwind {
 }
 
 impl ELFUnwind {
-	#[inline]
-    pub(crate) fn register_unwind_info(&self) {
+    #[inline]
+    pub(crate) fn register_unwind(&self, _segments: &ELFSegments) {
         extern "C" {
             fn __register_frame(begin: *const c_void);
         }

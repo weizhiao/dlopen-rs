@@ -20,11 +20,6 @@ impl ELFLibraryInner {
         let phdrs = file.parse_phdrs(&mut buf)?;
         let segments = ELFSegments::new(phdrs, &file)?;
 
-        #[cfg(feature = "unwinding")]
-        let mut text_start = usize::MAX;
-        #[cfg(feature = "unwinding")]
-        let mut text_end = usize::MAX;
-
         let mut unwind = None;
         let mut dynamics = None;
         let mut relro = None;
@@ -33,18 +28,7 @@ impl ELFLibraryInner {
 
         for phdr in phdrs {
             match phdr.p_type {
-                PT_LOAD => {
-                    segments.load_segment(phdr, &mut file)?;
-                    #[cfg(feature = "unwinding")]
-                    {
-                        if phdr.p_flags & PF_X != 0 {
-                            let this_min = phdr.p_vaddr as usize - addr_min;
-                            let this_max = (phdr.p_vaddr + phdr.p_filesz) as usize - addr_min;
-                            text_start = this_min + base;
-                            text_end = this_max + base;
-                        }
-                    }
-                }
+                PT_LOAD => segments.load_segment(phdr, &mut file)?,
                 PT_DYNAMIC => dynamics = Some(ELFDynamic::new(phdr, &segments)),
                 PT_GNU_EH_FRAME => unwind = Some(ELFUnwind::new(phdr, &segments)?),
                 PT_GNU_RELRO => relro = Some(ELFRelro::new(phdr, &segments)),
@@ -58,8 +42,8 @@ impl ELFLibraryInner {
             }
         }
 
-		if let Some(unwind_info) = unwind.as_ref() {
-            unwind_info.register_unwind_info();
+        if let Some(unwind_info) = unwind.as_ref() {
+            unwind_info.register_unwind(&segments);
         }
 
         let dynamics = if let Some(dynamics) = dynamics {
@@ -67,11 +51,6 @@ impl ELFLibraryInner {
         } else {
             return elfloader_error("elf file does not have dynamic".to_string());
         }?;
-
-        #[cfg(feature = "unwinding")]
-        if unlikely(text_start == usize::MAX || text_start == text_end) {
-            return elfloader_error("can not find .text start");
-        }
 
         let strtab = elf::string_table::StringTable::new(dynamics.strtab());
 

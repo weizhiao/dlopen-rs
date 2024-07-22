@@ -113,7 +113,7 @@ impl ELFLibrary {
 
         let res = unsafe { dl_iterate_phdr(Some(callback), &mut payload as *mut PayLoad as _) };
         if res == 0 {
-            return elfloader_error(format!("can not open self lib:{}", name));
+            return elfloader_error(format!("can not open self lib: {}", name));
         }
 
         let common = unsafe { ManuallyDrop::into_inner(payload.data) };

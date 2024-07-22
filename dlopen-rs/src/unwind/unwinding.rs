@@ -1,37 +1,85 @@
+use std::{ops::Range, sync::atomic::AtomicBool};
+
+use crate::segment::ELFSegments;
+
+use super::ELFUnwind;
+use hashbrown::{hash_table::Entry, HashTable};
+use spin::RwLock;
+use unwinding::custom_eh_frame_finder::{
+    set_custom_eh_frame_finder, EhFrameFinder, FrameInfo, FrameInfoKind,
+};
+
 impl Drop for ELFUnwind {
     fn drop(&mut self) {
-        use eh_finder::EH_FINDER;
-        use hashbrown::hash_table::Entry;
-        let mut eh_finder = unsafe { EH_FINDER.eh_info.write() };
+        let mut eh_finder = EH_FINDER.unwind_infos.write();
         if let Entry::Occupied(entry) = eh_finder.entry(
-            self.eh_frame_hdr as u64,
-            |val| val.eh_frame_hdr == self.eh_frame_hdr,
+            self.0 as u64,
+            |val| val.eh_frame_hdr == self.0,
             ELFUnwind::hasher,
         ) {
-            let info = entry.remove();
-            core::mem::forget(info.0);
+            let _ = entry.remove();
         } else {
             unreachable!();
         };
     }
 }
 
-impl ELFUnwind{
-    #[inline]
-    unsafe fn register_unwind_info(unwind_info: &ELFUnwind) {
-        use eh_finder::EH_FINDER;
-        use hashbrown::hash_map::DefaultHashBuilder;
+static IS_SET: AtomicBool = AtomicBool::new(false);
+static EH_FINDER: EhFinder = EhFinder::new();
 
-        EH_FINDER.eh_info.write().insert_unique(
-            unwind_info.eh_frame_hdr as u64,
-            unwind_info.clone(),
-            ELFUnwind::hasher,
-        );
+impl ELFUnwind {
+    #[inline]
+    pub(crate) fn register_unwind(&self, segments: &ELFSegments) {
+        if !IS_SET.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            set_custom_eh_frame_finder(&EH_FINDER).unwrap();
+        }
+
+        let unwind_info = UnwindInfo {
+            eh_frame_hdr: self.0,
+            pc_range: segments.base()..segments.base() + segments.len,
+        };
+
+        EH_FINDER
+            .unwind_infos
+            .write()
+            .insert_unique(self.0 as u64, unwind_info, ELFUnwind::hasher);
     }
 
-    #[cfg(feature = "unwinding")]
     //每个unwind_info的eh_frame_hdr都是不同的
-    fn hasher(val: &ELFUnwind) -> u64 {
+    fn hasher(val: &UnwindInfo) -> u64 {
         val.eh_frame_hdr as u64
+    }
+}
+
+struct UnwindInfo {
+    eh_frame_hdr: usize,
+    pc_range: Range<usize>,
+}
+
+struct EhFinder {
+    unwind_infos: RwLock<HashTable<UnwindInfo>>,
+}
+
+impl EhFinder {
+    const fn new() -> EhFinder {
+        EhFinder {
+            unwind_infos: RwLock::new(HashTable::new()),
+        }
+    }
+}
+
+unsafe impl EhFrameFinder for EhFinder {
+    fn find(&self, pc: usize) -> Option<FrameInfo> {
+        let unwind_infos = self.unwind_infos.read();
+        for unwind_info in &*unwind_infos {
+            let eh_frame_hdr = unwind_info.eh_frame_hdr;
+            if unwind_info.pc_range.contains(&pc) {
+                return Some(FrameInfo {
+                    text_base: None,
+                    kind: FrameInfoKind::EhFrameHdr(eh_frame_hdr),
+                });
+            }
+        }
+        None
     }
 }

@@ -62,13 +62,4 @@ impl ELFSegments {
             )
         }
     }
-
-    #[cfg(feature = "unwinding")]
-    #[inline]
-    fn get_unwind_info(&self, phdr: &Phdr) -> Result<usize> {
-        let addr_min = self.addr_min;
-        let base = self.memory as usize;
-        let eh_frame_addr = phdr.p_vaddr as usize - addr_min + base;
-        Ok(eh_frame_addr)
-    }
 }
