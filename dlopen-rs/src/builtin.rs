@@ -1,4 +1,4 @@
-use std::ffi::c_int;
+use core::ffi::c_int;
 
 #[cfg(feature = "tls")]
 use crate::tls::tls_get_addr;

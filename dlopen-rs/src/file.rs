@@ -1,7 +1,4 @@
-use std::{ffi::OsStr, mem::MaybeUninit};
-
-use crate::{ehdr::ELFEhdr, Phdr, Result, BUF_SIZE};
-use snafu::ResultExt;
+use crate::{ehdr::ELFEhdr, Phdr, Result};
 
 pub(crate) enum FileType {
     #[cfg(feature = "std")]
@@ -15,14 +12,15 @@ pub(crate) struct ELFFile {
 
 #[cfg(feature = "std")]
 pub(crate) struct Buf {
-    stack: MaybeUninit<[u8; BUF_SIZE]>,
+    stack: core::mem::MaybeUninit<[u8; crate::BUF_SIZE]>,
     heap: Vec<u8>,
 }
 
+#[cfg(feature = "std")]
 impl Buf {
     pub(crate) fn new() -> Buf {
         Buf {
-            stack: MaybeUninit::uninit(),
+            stack: core::mem::MaybeUninit::uninit(),
             heap: Vec::new(),
         }
     }
@@ -45,12 +43,14 @@ impl Buf {
 }
 
 #[cfg(not(feature = "std"))]
-struct Buf;
+pub(crate) struct Buf;
 
 impl ELFFile {
+    #[cfg(feature = "std")]
     #[inline]
-    pub(crate) fn from_file<P: AsRef<OsStr>>(path: P) -> Result<ELFFile> {
+    pub(crate) fn from_file<P: AsRef<std::ffi::OsStr>>(path: P) -> Result<ELFFile> {
         use crate::IOSnafu;
+		use snafu::ResultExt;
         use std::fs::File;
         let file = File::open(path.as_ref()).context(IOSnafu)?;
         Ok(ELFFile {
@@ -71,6 +71,7 @@ impl ELFFile {
             #[cfg(feature = "std")]
             FileType::Fd(file) => {
                 use crate::IOSnafu;
+				use snafu::ResultExt;
                 use std::{
                     io::Seek,
                     io::{Read, SeekFrom},
@@ -85,7 +86,7 @@ impl ELFFile {
                 let phdrs_num = ehdr.e_phnum();
                 let (phdr_start, phdr_end) = ehdr.phdr_range();
                 let phdrs_size = phdr_end - phdr_start;
-                let phdrs = if phdr_end > BUF_SIZE {
+                let phdrs = if phdr_end > crate::BUF_SIZE {
                     let heap = buf.heap();
                     heap.reserve(phdrs_size);
                     unsafe { heap.set_len(phdrs_size) };

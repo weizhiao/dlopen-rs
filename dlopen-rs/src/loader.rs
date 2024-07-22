@@ -1,6 +1,6 @@
 use crate::{
     dynamic::ELFDynamic,
-    elfloader_error,
+    loader_error,
     file::{Buf, ELFFile},
     hashtable::ELFHashTable,
     relocation::ELFRelocation,
@@ -9,6 +9,7 @@ use crate::{
     unwind::ELFUnwind,
     Result,
 };
+use alloc::{string::ToString, vec::Vec};
 use elf::abi::*;
 
 impl ELFLibraryInner {
@@ -49,7 +50,7 @@ impl ELFLibraryInner {
         let dynamics = if let Some(dynamics) = dynamics {
             dynamics
         } else {
-            return elfloader_error("elf file does not have dynamic".to_string());
+            return Err(loader_error("elf file does not have dynamic".to_string()));
         }?;
 
         let strtab = elf::string_table::StringTable::new(dynamics.strtab());

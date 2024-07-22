@@ -1,5 +1,8 @@
 #![feature(cfg_match)]
 #![cfg_attr(feature = "nightly", core_intrinsics)]
+#![cfg_attr(not(feature = "std"), no_std)]
+extern crate alloc;
+
 mod arch;
 mod builtin;
 mod dynamic;
@@ -16,18 +19,17 @@ mod tls;
 mod types;
 mod unwind;
 
+use alloc::string::String;
 pub use types::{ELFLibrary, ExternLibrary, RelocatedLibrary, Symbol};
 
 // 因为unlikely只能在nightly版本的编译器中使用
+use alloc::alloc::LayoutError;
 #[cfg(not(feature = "nightly"))]
 use core::convert::identity as unlikely;
 #[cfg(feature = "nightly")]
 use core::intrinsics::unlikely;
-use std::alloc::LayoutError;
 
 use elf::file::Class;
-
-extern crate alloc;
 
 #[cfg(not(any(
     target_arch = "x86_64",
@@ -64,7 +66,6 @@ cfg_match! {
     }
 }
 
-#[cfg(feature = "std")]
 const BUF_SIZE: usize = EHDR_SIZE + 8 * PHDR_SIZE;
 
 use elf::parse::ParseError;
@@ -77,15 +78,13 @@ pub enum Error {
     IOError {
         source: std::io::Error,
     },
-    #[snafu(display("Can't parse file, {msg}"))]
     ParseError {
         msg: ParseError,
     },
-    #[snafu(display("Can't parse file, {msg}"))]
+    #[cfg(feature = "mmap")]
     GimliError {
         msg: gimli::Error,
     },
-    #[snafu(display("Can't parse file, {msg}"))]
     LoaderError {
         msg: String,
     },
@@ -95,15 +94,13 @@ pub enum Error {
     FindSymbolError {
         msg: String,
     },
-    #[snafu(display("Unknown Error"))]
-    Unknown,
-    #[cfg(all(feature = "mmap", unix))]
+    ValidateError {
+        msg: String,
+    },
+	#[cfg(feature = "mmap")]
     Errno {
         source: nix::Error,
     },
-    ArchMismatch,
-    ClassMismatch,
-    FileTypeMismatch,
     LayoutError {
         source: LayoutError,
     },
@@ -115,6 +112,7 @@ fn parse_err_convert(err: elf::ParseError) -> Error {
     Error::ParseError { msg: err }
 }
 
+#[cfg(feature = "mmap")]
 #[cold]
 #[inline(never)]
 fn gimli_err_convert(err: gimli::Error) -> Error {
@@ -123,8 +121,14 @@ fn gimli_err_convert(err: gimli::Error) -> Error {
 
 #[cold]
 #[inline(never)]
-fn elfloader_error<T>(msg: String) -> Result<T> {
-    Err(Error::LoaderError { msg })
+fn loader_error(msg: String) -> Error {
+    Error::LoaderError { msg }
+}
+
+#[cold]
+#[inline(never)]
+fn relocate_error(msg: String) -> Error {
+    Error::RelocateError { msg }
 }
 
 pub type Result<T> = core::result::Result<T, Error>;

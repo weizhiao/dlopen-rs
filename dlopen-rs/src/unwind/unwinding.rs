@@ -1,4 +1,4 @@
-use std::{ops::Range, sync::atomic::AtomicBool};
+use core::{ops::Range, sync::atomic::AtomicBool};
 
 use crate::segment::ELFSegments;
 
@@ -30,7 +30,7 @@ static EH_FINDER: EhFinder = EhFinder::new();
 impl ELFUnwind {
     #[inline]
     pub(crate) fn register_unwind(&self, segments: &ELFSegments) {
-        if !IS_SET.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        if !IS_SET.swap(true, core::sync::atomic::Ordering::SeqCst) {
             set_custom_eh_frame_finder(&EH_FINDER).unwrap();
         }
 

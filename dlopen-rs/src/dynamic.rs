@@ -1,4 +1,5 @@
-use crate::{elfloader_error, segment::ELFSegments, Dyn, Phdr, Rela, Result};
+use crate::{loader_error, segment::ELFSegments, Dyn, Phdr, Rela, Result};
+use alloc::{string::ToString, vec::Vec};
 use elf::abi::*;
 
 pub(crate) struct ELFDynamic {
@@ -41,7 +42,7 @@ impl ELFDynamic {
         let mut init_array_size = None;
         let mut fini_array_off = None;
         let mut fini_array_size = None;
-        let mut needed_libs = vec![];
+        let mut needed_libs = Vec::new();
 
         for dynamic in dynamics {
             match dynamic.d_tag {
@@ -67,19 +68,25 @@ impl ELFDynamic {
         let hash_off = if let Some(hash_off) = hash_off {
             hash_off + base
         } else {
-            return elfloader_error("dynamic section does not have DT_GNU_HASH".to_string());
+            return Err(loader_error(
+                "dynamic section does not have DT_GNU_HASH".to_string(),
+            ));
         };
 
         let symtab_off = if let Some(symtab_off) = symtab_off {
             symtab_off + base
         } else {
-            return elfloader_error("dynamic section does not have DT_SYMTAB".to_string());
+            return Err(loader_error(
+                "dynamic section does not have DT_SYMTAB".to_string(),
+            ));
         };
 
         let strtab = if let Some(strtab_off) = strtab_off {
             &segments.as_mut_slice()[strtab_off..strtab_off + strtab_size.unwrap()]
         } else {
-            return elfloader_error("dynamic section does not have DT_STRTAB".to_string());
+            return Err(loader_error(
+                "dynamic section does not have DT_STRTAB".to_string(),
+            ));
         };
 
         let pltrel = if let Some(pltrel_off) = pltrel_off {

@@ -1,8 +1,9 @@
-use std::{
-    alloc::{dealloc, Layout},
-    ptr::NonNull,
+use core::{
+    alloc::Layout, ptr::NonNull
 };
 
+
+use alloc::alloc::dealloc;
 use elf::abi::PT_LOAD;
 use snafu::ResultExt;
 

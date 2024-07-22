@@ -10,7 +10,7 @@ use nix::libc::{dl_iterate_phdr, dl_phdr_info, size_t};
 
 use crate::{
     dynamic::ELFDynamic,
-    elfloader_error,
+    loader_error,
     hashtable::ELFHashTable,
     segment::ELFSegments,
     types::{CommonInner, RelocatedLibraryInner},
@@ -113,7 +113,7 @@ impl ELFLibrary {
 
         let res = unsafe { dl_iterate_phdr(Some(callback), &mut payload as *mut PayLoad as _) };
         if res == 0 {
-            return elfloader_error(format!("can not open self lib: {}", name));
+            return Err(loader_error(format!("can not open self lib: {}", name)));
         }
 
         let common = unsafe { ManuallyDrop::into_inner(payload.data) };

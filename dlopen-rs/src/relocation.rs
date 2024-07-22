@@ -1,12 +1,14 @@
-use crate::arch::*;
 use crate::segment::ELFRelro;
 use crate::types::ExternLibrary;
+use crate::{arch::*, relocate_error};
 use crate::{
     builtin::BUILTIN,
-    elfloader_error, parse_err_convert,
+    parse_err_convert,
     types::{ELFLibrary, RelocatedLibrary},
-    Error, Rela, Result, REL_BIT, REL_MASK,
+    Rela, Result, REL_BIT, REL_MASK,
 };
+use alloc::boxed::Box;
+use alloc::format;
 use elf::abi::*;
 
 #[derive(Debug)]
@@ -98,7 +100,9 @@ impl ELFLibrary {
 
                                 None
                             })
-                            .ok_or_else(|| relocate_error(&name))?;
+                            .ok_or_else(|| {
+                                relocate_error(format!("can not relocate symbol {}", name))
+                            })?;
                         symbol
                     };
 
@@ -147,15 +151,10 @@ impl ELFLibrary {
                     // 实现它需要对要libc做修改，因为它要使用tp来访问thread local，
                     // 而线程栈里保存的东西完全是由libc控制的
 
-                    return elfloader_error(format!("unsupport relocate type {}", r_type));
-                }
-            }
-
-            #[cold]
-            #[inline(never)]
-            fn relocate_error(name: &str) -> crate::Error {
-                Error::RelocateError {
-                    msg: format!("can not relocate symbol {}", name),
+                    return Err(relocate_error(format!(
+                        "unsupport relocate type {}",
+                        r_type
+                    )));
                 }
             }
         }

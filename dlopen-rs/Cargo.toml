@@ -23,6 +23,7 @@ optional = true
 version = "0.30"
 default-features = false
 features = ["read-core"]
+optional = true
 
 [dependencies.hashbrown]
 version = '0.14'
@@ -50,10 +51,10 @@ version = "0.7.4"
 default-features = false
 
 [features]
-default = ["load_self", "tls", "mmap", "libgcc"]
+default = ["libgcc", "load_self", "tls"]
 
 # enable load the dso of the program itself
-load_self = ["std", "dep:nix"]
+load_self = ["mmap"]
 # enable std
 std = []
 # enable this on platforms that support mmap
@@ -64,12 +65,28 @@ nightly = []
 # enable this when you want to use the exception handling mechanism provided by dlopen-rs
 unwinding = ["dep:unwinding", "dep:spin"]
 # enable this when program uses libgcc to handle exceptions
-libgcc = []
+libgcc = ["dep:gimli"]
 # enable this when program uses libunwind to handle exceptions
-libunwind = []
+libunwind = ["dep:gimli"]
 # see https://github.com/nbdd0121/unwinding/#unwinder
 fde-phdr-dl = ["unwinding?/fde-phdr-dl"]
 # see https://github.com/nbdd0121/unwinding/#baremetal
 fde-static = ["unwinding?/fde-static"]
 # see https://github.com/nbdd0121/unwinding/#baremetal
 fde-gnu-eh-frame-hdr = ["unwinding?/fde-gnu-eh-frame-hdr"]
+
+[[example]]
+name = "load_self"
+required-features = ["load_self", "libgcc", "tls"]
+
+[[example]]
+name = "from_binary"
+required-features = ["load_self", "libgcc", "tls"]
+
+[[example]]
+name = "relocate_with"
+required-features = ["mmap", "tls", "libgcc"]
+
+[[example]]
+name = "unwinding"
+required-features = ["mmap", "tls", "unwinding", "load_self", "fde-phdr-dl"]

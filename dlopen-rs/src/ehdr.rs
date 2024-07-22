@@ -1,4 +1,5 @@
 use crate::{parse_err_convert, unlikely, Error, Result, EHDR_SIZE, E_CLASS};
+use alloc::string::ToString;
 use elf::{
     abi::*,
     endian::NativeEndian,
@@ -33,15 +34,21 @@ impl ELFEhdr {
         const EM_ARCH: u16 = EM_RISCV;
 
         if unlikely(self.ehdr.e_type != ET_DYN) {
-            return Err(Error::FileTypeMismatch);
+            return Err(Error::ValidateError {
+                msg: "file type mismatch".to_string(),
+            });
         }
 
         if unlikely(self.ehdr.e_machine != EM_ARCH) {
-            return Err(Error::ArchMismatch);
+			return Err(Error::ValidateError {
+                msg: "arch type mismatch".to_string(),
+            });
         }
 
         if unlikely(self.ehdr.class != E_CLASS) {
-            return Err(Error::ClassMismatch);
+			return Err(Error::ValidateError {
+                msg: "class type mismatch".to_string(),
+            });
         }
 
         Ok(())

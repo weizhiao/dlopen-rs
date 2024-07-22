@@ -1,11 +1,10 @@
-use std::{
-    ffi::OsStr,
+use core::{
     fmt::Debug,
     marker::{self, PhantomData},
     ops,
-    sync::Arc,
 };
 
+use alloc::{boxed::Box, format, vec::Vec,sync::Arc};
 use elf::string_table::StringTable;
 
 use crate::{
@@ -68,7 +67,8 @@ pub struct ELFLibrary {
 }
 
 impl ELFLibrary {
-    pub fn from_file<P: AsRef<OsStr>>(path: P) -> Result<ELFLibrary> {
+	#[cfg(feature = "std")]
+    pub fn from_file<P: AsRef<std::ffi::OsStr>>(path: P) -> Result<ELFLibrary> {
         let file = ELFFile::from_file(path.as_ref())?;
         let inner = ELFLibraryInner::load_library(file)?;
         Ok(ELFLibrary { inner })
