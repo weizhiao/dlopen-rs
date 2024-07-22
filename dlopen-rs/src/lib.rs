@@ -6,6 +6,7 @@ mod dynamic;
 mod ehdr;
 mod file;
 mod hashtable;
+#[cfg(feature = "load_self")]
 mod load_self;
 mod loader;
 mod relocation;
@@ -22,6 +23,7 @@ pub use types::{ELFLibrary, ExternLibrary, RelocatedLibrary, Symbol};
 use core::convert::identity as unlikely;
 #[cfg(feature = "nightly")]
 use core::intrinsics::unlikely;
+use std::alloc::LayoutError;
 
 use elf::file::Class;
 
@@ -102,6 +104,9 @@ pub enum Error {
     ArchMismatch,
     ClassMismatch,
     FileTypeMismatch,
+    LayoutError {
+        source: LayoutError,
+    },
 }
 
 #[cold]

@@ -1,6 +1,7 @@
 use std::{
     ffi::{c_int, c_void, CStr},
     mem::ManuallyDrop,
+    ptr::NonNull,
     sync::Arc,
 };
 
@@ -15,6 +16,16 @@ use crate::{
     types::{CommonInner, RelocatedLibraryInner},
     ELFLibrary, RelocatedLibrary, Result,
 };
+
+impl ELFSegments {
+    pub(crate) fn dump(addr: usize) -> ELFSegments {
+        ELFSegments {
+            memory: unsafe { NonNull::new_unchecked(addr as *mut _) },
+            offset: 0,
+            len: isize::MAX as _,
+        }
+    }
+}
 
 impl ELFLibrary {
     pub fn load_self(name: &str) -> Result<RelocatedLibrary> {
@@ -82,6 +93,7 @@ impl ELFLibrary {
                     segments,
                     fini_fn: None,
                     fini_array_fn: None,
+					#[cfg(feature = "tls")]
                     tls: None,
                 });
 

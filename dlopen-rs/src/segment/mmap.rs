@@ -1,77 +1,33 @@
-use crate::{file::FileType, unlikely, Phdr, Result};
-use core::ffi::c_void;
-use core::ptr::NonNull;
+use std::ptr::NonNull;
 
 use elf::abi::{PF_R, PF_W, PF_X, PT_LOAD};
 use snafu::ResultExt;
 
-use crate::file::ELFFile;
+use crate::{
+    file::{ELFFile, FileType},
+    segment::{MASK, PAGE_SIZE},
+    unlikely, Phdr, Result,
+};
 
-#[cfg(target_arch = "aarch64")]
-const PAGE_SIZE: usize = 0x10000;
-#[cfg(not(target_arch = "aarch64"))]
-const PAGE_SIZE: usize = 0x1000;
-
-const MASK: usize = (0 - PAGE_SIZE as isize) as usize;
-
-#[allow(unused)]
-#[derive(Debug)]
-pub(crate) struct ELFRelro {
-    addr: usize,
-    len: usize,
-}
+use super::{ELFRelro, ELFSegments};
 
 impl ELFRelro {
-    pub(crate) fn new(phdr: &Phdr, segments: &ELFSegments) -> ELFRelro {
-        ELFRelro {
-            addr: segments.base() + phdr.p_vaddr as usize,
-            len: phdr.p_memsz as usize,
-        }
-    }
-
     #[inline]
     pub(crate) fn relro(&self) -> Result<()> {
-        #[cfg(feature = "mmap")]
-        {
-            use crate::ErrnoSnafu;
-            use nix::sys::mman;
-            let end = (self.addr + self.len + PAGE_SIZE - 1) & MASK;
-            let start = self.addr & MASK;
-            let start_addr = unsafe { NonNull::new_unchecked(start as _) };
-            unsafe {
-                mman::mprotect(start_addr, end - start, mman::ProtFlags::PROT_READ)
-                    .context(ErrnoSnafu)?;
-            }
+        use crate::ErrnoSnafu;
+        use nix::sys::mman;
+        let end = (self.addr + self.len + PAGE_SIZE - 1) & MASK;
+        let start = self.addr & MASK;
+        let start_addr = unsafe { NonNull::new_unchecked(start as _) };
+        unsafe {
+            mman::mprotect(start_addr, end - start, mman::ProtFlags::PROT_READ)
+                .context(ErrnoSnafu)?;
         }
+
         Ok(())
     }
 }
 
-#[derive(Debug)]
-pub(crate) struct ELFSegments {
-    memory: NonNull<c_void>,
-    addr_min: usize,
-    len: usize,
-}
-
-impl ELFSegments {
-    pub(crate) fn dump(addr: usize) -> ELFSegments {
-        ELFSegments {
-            memory: unsafe { NonNull::new_unchecked(addr as *mut _) },
-            addr_min: 0,
-            len: isize::MAX as _,
-        }
-    }
-}
-
-#[cfg(not(feature = "mmap"))]
-impl Drop for ELFSegments {
-    fn drop(&mut self) {
-        MEM_USED.store(false, core::sync::atomic::Ordering::SeqCst)
-    }
-}
-
-#[cfg(feature = "mmap")]
 impl Drop for ELFSegments {
     fn drop(&mut self) {
         use nix::sys::mman;
@@ -80,40 +36,6 @@ impl Drop for ELFSegments {
                 mman::munmap(self.memory, self.len).unwrap();
             }
         }
-    }
-}
-
-impl ELFSegments {
-    /// base = memory_addr - addr_min
-    #[inline]
-    pub(crate) fn base(&self) -> usize {
-        (self.memory.as_ptr()) as usize - self.addr_min
-    }
-
-    /// start = memory_addr - addr_min
-    #[inline]
-    pub(crate) fn as_mut_ptr(&self) -> *mut u8 {
-        unsafe { self.memory.as_ptr().cast::<u8>().sub(self.addr_min) }
-    }
-
-    /// start = memory_addr - addr_min
-    #[inline]
-    pub(crate) fn as_mut_slice(&self) -> &'static mut [u8] {
-        unsafe {
-            core::slice::from_raw_parts_mut(
-                self.memory.as_ptr().cast::<u8>().sub(self.addr_min),
-                self.len,
-            )
-        }
-    }
-
-    #[cfg(feature = "unwinding")]
-    #[inline]
-    fn get_unwind_info(&self, phdr: &Phdr) -> Result<usize> {
-        let addr_min = self.addr_min;
-        let base = self.memory as usize;
-        let eh_frame_addr = phdr.p_vaddr as usize - addr_min + base;
-        Ok(eh_frame_addr)
     }
 }
 
@@ -193,7 +115,7 @@ impl ELFSegments {
         } as _;
         Ok(ELFSegments {
             memory,
-            addr_min,
+            offset: -(addr_min as isize),
             len: len.get(),
         })
     }
@@ -205,7 +127,7 @@ impl ELFSegments {
         use nix::sys::mman;
 
         // 映射的起始地址与结束地址都是页对齐的
-        let addr_min = self.addr_min;
+        let addr_min = (-self.offset) as usize;
         let base = self.base();
         // addr_min对应memory中的起始
         let this_min = phdr.p_vaddr as usize & MASK;
@@ -278,78 +200,6 @@ impl ELFSegments {
                     .context(ErrnoSnafu)?
                 }
             }
-        }
-        Ok(())
-    }
-}
-
-#[cfg(not(feature = "mmap"))]
-static MEM_USED: AtomicBool = AtomicBool::new(false);
-
-#[cfg(not(feature = "mmap"))]
-impl ELFSegments {
-    #[inline]
-    fn new(
-        prot: u32,
-        len: usize,
-        _off: usize,
-        addr_min: usize,
-        file: &ELFFile,
-    ) -> Result<ELFSegments> {
-        extern "C" {
-            static mut __elfloader_memory_start: u8;
-            static mut __elfloader_memory_end: u8;
-        }
-
-        if unlikely(MEM_USED.fetch_or(true, core::sync::atomic::Ordering::SeqCst)) {
-            return elfloader_error("elfloader memory has been used");
-        }
-
-        let max_len = unsafe {
-            &__elfloader_memory_end as *const u8 as isize
-                - &__elfloader_memory_start as *const u8 as isize
-        };
-
-        if unlikely(max_len < len as isize) {
-            return elfloader_error("elfloader memory overflow");
-        }
-
-        let memory = unsafe { &mut __elfloader_memory_start as *mut u8 };
-        Ok(ELFSegments {
-            memory,
-            addr_min,
-            len,
-        })
-    }
-
-    #[inline]
-    fn load_segment(&self, phdr: &Phdr, file: &mut ELFFile) -> Result<()> {
-        let addr_min = self.addr_min;
-        let memory_slice = self.as_mut_slice();
-        let this_min = phdr.p_vaddr as usize - addr_min;
-        let this_max = (phdr.p_vaddr + phdr.p_filesz) as usize - addr_min;
-        let this_off = phdr.p_offset as usize;
-        let this_off_end = (phdr.p_offset + phdr.p_filesz) as usize;
-        let this_mem = &mut memory_slice[this_min..this_max];
-        match &mut file.context {
-            #[cfg(feature = "std")]
-            Context::Fd(file) => {
-                use crate::IOSnafu;
-                use std::io::{Read, Seek, SeekFrom};
-                file.seek(SeekFrom::Start(this_off.try_into().unwrap()))
-                    .context(IOSnafu)?;
-                file.read_exact(this_mem).context(IOSnafu)?;
-            }
-            Context::Binary(file) => {
-                this_mem.copy_from_slice(&file[this_off..this_off_end]);
-            }
-        }
-        //将类似bss节的内存区域的值设置为0
-        if unlikely(phdr.p_filesz != phdr.p_memsz) {
-            let zero_start = this_max;
-            let zero_end = zero_start + (phdr.p_memsz - phdr.p_filesz) as usize;
-            let zero_mem = &mut memory_slice[zero_start..zero_end];
-            zero_mem.fill(0);
         }
         Ok(())
     }

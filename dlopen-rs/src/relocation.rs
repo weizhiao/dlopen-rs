@@ -174,10 +174,6 @@ impl ELFLibrary {
             relro.relro()?;
         }
 
-        if let Some(unwind_info) = self.unwind() {
-            unwind_info.register_unwind_info();
-        }
-
         let extern_lib = extern_lib.map(|lib| Box::new(lib) as Box<dyn ExternLibrary>);
 
         Ok(RelocatedLibrary::new(self, inner_libs.to_vec(), extern_lib))

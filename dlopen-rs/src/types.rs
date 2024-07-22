@@ -28,6 +28,7 @@ pub(crate) struct ELFLibraryInner {
 }
 
 #[derive(Debug)]
+#[allow(unused)]
 pub(crate) struct CommonInner {
     /// .gnu.hash
     pub(crate) hashtab: ELFHashTable,
@@ -104,6 +105,7 @@ impl ELFLibrary {
     }
 
     #[inline]
+	#[cfg(feature = "tls")]
     pub(crate) fn tls(&self) -> &Option<Box<crate::tls::ELFTLS>> {
         &self.inner.common.tls
     }
@@ -116,10 +118,6 @@ impl ELFLibrary {
     #[inline]
     pub(crate) fn init_array_fn(&self) -> &Option<&'static [extern "C" fn()]> {
         &self.inner.init_array_fn
-    }
-
-    pub(crate) fn unwind(&self) -> &Option<ELFUnwind> {
-        &self.inner.common.unwind
     }
 }
 

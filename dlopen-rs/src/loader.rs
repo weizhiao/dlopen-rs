@@ -34,7 +34,7 @@ impl ELFLibraryInner {
         for phdr in phdrs {
             match phdr.p_type {
                 PT_LOAD => {
-                    segments.load_segment(phdr, &file)?;
+                    segments.load_segment(phdr, &mut file)?;
                     #[cfg(feature = "unwinding")]
                     {
                         if phdr.p_flags & PF_X != 0 {
@@ -56,6 +56,10 @@ impl ELFLibraryInner {
                 }
                 _ => {}
             }
+        }
+
+		if let Some(unwind_info) = unwind.as_ref() {
+            unwind_info.register_unwind_info();
         }
 
         let dynamics = if let Some(dynamics) = dynamics {

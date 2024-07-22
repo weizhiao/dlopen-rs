@@ -18,7 +18,7 @@ impl ExternLibrary for MyLib {
 
 fn main() {
     let path =
-        Path::new("/home/wei/dlopen-rs/target/x86_64-unknown-linux-musl/release/libexample.so");
+        Path::new("/home/wei/dlopen-rs/target/release/libexample.so");
 
     let libc = MyLib(Arc::new(unsafe {
         Library::new("/lib/x86_64-linux-gnu/libc.so.6").unwrap()

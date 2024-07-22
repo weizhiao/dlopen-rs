@@ -34,10 +34,6 @@ default-features = false
 features = ['mman', 'signal']
 optional = true
 
-[dependencies.libloading]
-version = "0.8"
-optional = true
-
 [dependencies.phf]
 version = '0.11'
 default-features = false
@@ -47,10 +43,12 @@ features = ['macros']
 elf = { version = "0.7.4", default-features = false }
 
 [features]
-default = ["std", "mmap", "tls", "libloading"]
-libloading = ["dep:libloading", "mmap"]
+default = ["load_self","libgcc","tls","mmap"]
+load_self = ["std", "dep:nix"]
 std = []
 mmap = ["dep:nix", "std"]
 tls = []
 nightly = []
 unwinding = ["dep:unwinding"]
+libgcc = []
+libunwind = []
