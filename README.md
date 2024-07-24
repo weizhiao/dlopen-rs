@@ -1,6 +1,6 @@
 # dlopen-rs
 
-dLopen-rs supports loading dynamic libraries from memory and files, supports `no_std` environments, and does not enforce dependencies on the dynamic linker `ldso`
+dLopen-rs supports loading dynamic libraries from memory and files, supports `no_std` environments, and does not rely on the dynamic linker `ldso`
 
 ```rust
 use dlopen_rs::ELFLibrary;
