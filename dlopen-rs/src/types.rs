@@ -4,7 +4,7 @@ use core::{
     ops,
 };
 
-use alloc::{boxed::Box, format, vec::Vec,sync::Arc};
+use alloc::{boxed::Box, format, sync::Arc, vec::Vec};
 use elf::string_table::StringTable;
 
 use crate::{
@@ -67,13 +67,38 @@ pub struct ELFLibrary {
 }
 
 impl ELFLibrary {
-	#[cfg(feature = "std")]
+    /// Find and load a elf dynamic library from path.
+    ///
+    /// The `filename` argument may be either:
+    ///
+    /// * A library filename;
+    /// * The absolute path to the library;
+    /// * A relative (to the current working directory) path to the library.
+    /// # Examples
+    ///
+    ///
+    /// ```no_run
+    /// # use ::dlopen_rs::ELFLibrary;
+    /// let lib = ELFLibrary::from_file("/path/to/awesome.module")
+    ///		.unwrap();
+    /// ```
+    ///
+    #[cfg(feature = "std")]
     pub fn from_file<P: AsRef<std::ffi::OsStr>>(path: P) -> Result<ELFLibrary> {
         let file = ELFFile::from_file(path.as_ref())?;
         let inner = ELFLibraryInner::load_library(file)?;
         Ok(ELFLibrary { inner })
     }
 
+    /// load a elf dynamic library from bytes
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use ::dlopen_rs::ELFLibrary;
+    /// let path = Path::new("/path/to/awesome.module");
+    /// let bytes = std::fs::read(path).unwrap();
+    /// let lib = ELFLibrary::from_binary(&bytes).unwarp();
+    /// ```
     pub fn from_binary(bytes: &[u8]) -> Result<ELFLibrary> {
         let file = ELFFile::from_binary(bytes);
         let inner = ELFLibraryInner::load_library(file)?;
@@ -105,7 +130,7 @@ impl ELFLibrary {
     }
 
     #[inline]
-	#[cfg(feature = "tls")]
+    #[cfg(feature = "tls")]
     pub(crate) fn tls(&self) -> &Option<Box<crate::tls::ELFTLS>> {
         &self.inner.common.tls
     }
@@ -125,9 +150,8 @@ impl ELFLibrary {
 #[allow(unused)]
 pub(crate) struct RelocatedLibraryInner {
     pub(crate) common: CommonInner,
-    pub(crate) needed_libs: Vec<RelocatedLibrary>,
-    /// only one extern lib can be used
-    pub(crate) extern_lib: Option<Box<dyn ExternLibrary>>,
+    pub(crate) internal_libs: Vec<RelocatedLibrary>,
+    pub(crate) external_libs: Option<Vec<Box<dyn ExternLibrary>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -138,13 +162,13 @@ pub struct RelocatedLibrary {
 impl RelocatedLibrary {
     pub(crate) fn new(
         lib: ELFLibrary,
-        needed_libs: Vec<RelocatedLibrary>,
-        extern_lib: Option<Box<dyn ExternLibrary>>,
+        internal_libs: Vec<RelocatedLibrary>,
+        external_libs: Option<Vec<Box<dyn ExternLibrary>>>,
     ) -> RelocatedLibrary {
         let inner = RelocatedLibraryInner {
             common: lib.inner.common,
-            needed_libs,
-            extern_lib,
+            internal_libs,
+            external_libs,
         };
 
         RelocatedLibrary {
@@ -162,7 +186,47 @@ impl RelocatedLibrary {
         })
     }
 
-    pub fn get<'lib, T>(&'lib self, name: &str) -> Result<Symbol<'lib, T>> {
+    /// Get a pointer to a function or static variable by symbol name.
+    ///
+    /// The symbol is interpreted as-is; no mangling is done. This means that symbols like `x::y` are
+    /// most likely invalid.
+    ///
+    /// # Safety
+    ///
+    /// Users of this API must specify the correct type of the function or variable loaded.
+    ///
+    ///
+    /// # Examples
+    ///
+    /// Given a loaded library:
+    ///
+    /// ```no_run
+    /// # use ::dlopen_rs::ELFLibrary;
+    /// let lib = ELFLibrary::from_file("/path/to/awesome.module")
+    ///		.unwrap()
+    ///		.relocate(&[])
+    ///		.unwrap();
+    /// ```
+    ///
+    /// Loading and using a function looks like this:
+    ///
+    /// ```no_run
+    /// unsafe {
+    ///     let awesome_function: Symbol<unsafe extern fn(f64) -> f64> =
+    ///         lib.get("awesome_function").unwrap();
+    ///     awesome_function(0.42);
+    /// }
+    /// ```
+    ///
+    /// A static variable may also be loaded and inspected:
+    ///
+    /// ```no_run
+    /// unsafe {
+    ///     let awesome_variable: Symbol<*mut f64> = lib.get("awesome_variable").unwrap();
+    ///     **awesome_variable = 42.0;
+    /// };
+    /// ```
+    pub unsafe fn get<'lib, T>(&'lib self, name: &str) -> Result<Symbol<'lib, T>> {
         self.get_sym(name)
             .map(|sym| Symbol {
                 ptr: sym as _,
@@ -188,7 +252,22 @@ impl Drop for RelocatedLibrary {
 }
 
 pub trait ExternLibrary: Debug {
-    /// get lib's symbol
+    /// Get the symbol of the dynamic library, and the return value is the address of the symbol
+    /// # Examples
+    /// #[derive(Debug, Clone)]
+    /// ```
+    /// struct MyLib(Arc<Library>);
+    ///
+    /// impl ExternLibrary for MyLib {
+    /// 	fn get_sym(&self, name: &str) -> Option<*const ()> {
+    /// 		let sym: Option<*const ()> = unsafe {
+    ///  			self.0.get::<*const usize>(name.as_bytes())
+    ///				.map_or(None, |sym| Some(sym.into_raw().into_raw() as _))
+    ///			};
+    ///			sym
+    /// 	}
+    ///}
+    /// ```
     fn get_sym(&self, name: &str) -> Option<*const ()>;
 }
 

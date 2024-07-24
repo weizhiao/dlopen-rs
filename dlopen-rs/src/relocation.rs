@@ -19,26 +19,30 @@ pub(crate) struct ELFRelocation {
 }
 
 impl ELFLibrary {
-    pub fn relocate(self, inner_libs: &[RelocatedLibrary]) -> Result<RelocatedLibrary> {
-        #[derive(Debug)]
-        struct Dump;
-        impl ExternLibrary for Dump {
-            #[cold]
-            fn get_sym(&self, _name: &str) -> Option<*const ()> {
-                None
-            }
-        }
-        self.relocate_with::<Dump>(inner_libs, None)
+	/// use internal dependent libraries to relocate the current library
+	/// # Examples
+    ///
+    ///
+    /// ```no_run
+    /// # use ::dlopen_rs::ELFLibrary;
+	/// let libc = ELFLibrary::load_self("libc").unwrap();
+    /// let libgcc = ELFLibrary::load_self("libgcc").unwrap();
+    /// let lib = ELFLibrary::from_file("/path/to/awesome.module")
+	/// 	.unwrap()
+	/// 	.relocate(&[libgcc, libc])
+	///		.unwrap();
+    /// ```
+    ///
+    pub fn relocate(self, internal_libs: &[RelocatedLibrary]) -> Result<RelocatedLibrary> {
+        self.relocate_with(internal_libs, None)
     }
 
-    pub fn relocate_with<T>(
+	/// use internal and external dependency libraries to relocate the current library
+    pub fn relocate_with(
         self,
-        inner_libs: &[RelocatedLibrary],
-        extern_lib: Option<T>,
-    ) -> Result<RelocatedLibrary>
-    where
-        T: ExternLibrary + 'static,
-    {
+        internal_libs: &[RelocatedLibrary],
+        external_libs: Option<Vec<Box<dyn ExternLibrary + 'static>>>,
+    ) -> Result<RelocatedLibrary> {
         let pltrel = if let Some(pltrel) = self.relocation().pltrel {
             pltrel.iter()
         } else {
@@ -88,16 +92,19 @@ impl ELFLibrary {
                                     });
                                 }
 
-                                for lib in inner_libs.iter() {
+                                for lib in internal_libs.iter() {
                                     if let Some(sym) = lib.get_sym(name) {
                                         return Some(sym);
                                     }
                                 }
 
-                                if let Some(lib) = extern_lib.as_ref() {
-                                    return lib.get_sym(name);
+                                if let Some(libs) = external_libs.as_ref() {
+									for lib in libs.iter() {
+										if let Some(sym) = lib.get_sym(name) {
+											return Some(sym);
+										}
+									}
                                 }
-
                                 None
                             })
                             .ok_or_else(|| {
@@ -147,7 +154,6 @@ impl ELFLibrary {
                 _ => {
                     // REL_TPOFF：这种类型的重定位明显做不到，它是为静态模型设计的，这种方式
                     // 可以通过带偏移量的内存读取来获取TLS变量，无需使用__tls_get_addr，
-                    // 即可以使用它来较快的访问那些在程序启动时就确定加载的dso中的TLS，
                     // 实现它需要对要libc做修改，因为它要使用tp来访问thread local，
                     // 而线程栈里保存的东西完全是由libc控制的
 
@@ -173,8 +179,6 @@ impl ELFLibrary {
             relro.relro()?;
         }
 
-        let extern_lib = extern_lib.map(|lib| Box::new(lib) as Box<dyn ExternLibrary>);
-
-        Ok(RelocatedLibrary::new(self, inner_libs.to_vec(), extern_lib))
+        Ok(RelocatedLibrary::new(self, internal_libs.to_vec(), external_libs))
     }
 }

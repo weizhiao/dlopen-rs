@@ -81,7 +81,7 @@ pub enum Error {
     ParseError {
         msg: ParseError,
     },
-    #[cfg(feature = "mmap")]
+    #[cfg(any(feature = "libgcc", feature = "libunwind"))]
     GimliError {
         msg: gimli::Error,
     },
@@ -97,7 +97,7 @@ pub enum Error {
     ValidateError {
         msg: String,
     },
-	#[cfg(feature = "mmap")]
+    #[cfg(feature = "mmap")]
     Errno {
         source: nix::Error,
     },
@@ -112,7 +112,7 @@ fn parse_err_convert(err: elf::ParseError) -> Error {
     Error::ParseError { msg: err }
 }
 
-#[cfg(feature = "mmap")]
+#[cfg(any(feature = "libgcc", feature = "libunwind"))]
 #[cold]
 #[inline(never)]
 fn gimli_err_convert(err: gimli::Error) -> Error {

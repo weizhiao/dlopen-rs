@@ -5,6 +5,7 @@
 //! It's main purpose is to be used in tests of dynlib crate.
 
 use std::{
+    backtrace,
     cell::Cell,
     os::raw::{c_char, c_int},
     thread,
@@ -13,6 +14,7 @@ use std::{
 #[no_mangle]
 pub extern "C-unwind" fn c_func_panic() {
     let res = std::panic::catch_unwind(|| {
+        println!("hello");
         panic!("panic!");
     });
     assert!(res.is_err());

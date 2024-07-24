@@ -10,8 +10,8 @@ use nix::libc::{dl_iterate_phdr, dl_phdr_info, size_t};
 
 use crate::{
     dynamic::ELFDynamic,
-    loader_error,
     hashtable::ELFHashTable,
+    loader_error,
     segment::ELFSegments,
     types::{CommonInner, RelocatedLibraryInner},
     ELFLibrary, RelocatedLibrary, Result,
@@ -28,6 +28,14 @@ impl ELFSegments {
 }
 
 impl ELFLibrary {
+    /// Load the dynamic library used by the current program itself,
+    /// you can load it using the name of the library
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use ::dlopen_rs::ELFLibrary;
+	/// let libc = ELFLibrary::load_self("libc").unwrap();
+    /// ```
     pub fn load_self(name: &str) -> Result<RelocatedLibrary> {
         unsafe extern "C" fn callback(
             info: *mut dl_phdr_info,
@@ -93,7 +101,7 @@ impl ELFLibrary {
                     segments,
                     fini_fn: None,
                     fini_array_fn: None,
-					#[cfg(feature = "tls")]
+                    #[cfg(feature = "tls")]
                     tls: None,
                 });
 
@@ -120,8 +128,8 @@ impl ELFLibrary {
 
         let inner = RelocatedLibraryInner {
             common,
-            needed_libs: Vec::new(),
-            extern_lib: None,
+            internal_libs: Vec::new(),
+            external_libs: None,
         };
         Ok(RelocatedLibrary {
             inner: Arc::new(inner),
