@@ -9,6 +9,7 @@ use crate::{
 };
 use alloc::boxed::Box;
 use alloc::format;
+use alloc::vec::Vec;
 use elf::abi::*;
 
 #[derive(Debug)]

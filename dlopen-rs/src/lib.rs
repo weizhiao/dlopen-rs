@@ -1,4 +1,36 @@
-#![feature(cfg_match)]
+//! The `elf` crate provides a pure-safe-rust interface for reading ELF object files.
+//! The `dopen_rs` crate supports loading dynamic libraries from memory and files,
+//! supports `no_std` environments, and does not rely on the dynamic linker `ldso`
+//!
+//! There is currently no support for using backtrace in loaded dynamic library code,
+//! and there is no support for debugging loaded dynamic libraries using gdb
+//! 
+//! # Examples
+//! ```
+//! use dlopen_rs::ELFLibrary;
+//! use std::path::Path;
+//! let path = Path::new("./target/release/libexample.so");
+//! let libc = ELFLibrary::load_self("libc").unwrap();
+//! let libgcc = ELFLibrary::load_self("libgcc").unwrap();
+//! let libexample = ELFLibrary::from_file(path)
+//!		.unwrap()
+//!		.relocate(&[libgcc, libc])
+//!		.unwrap();
+//!
+//! let f: dlopen_rs::Symbol<extern "C" fn(i32) -> i32> =
+//! 	unsafe { libexample.get("c_fun_add_two").unwrap() };
+//! println!("{}", f(2));
+//! let f: dlopen_rs::Symbol<extern "C" fn()> =
+//! 	unsafe { libexample.get("c_fun_print_something_else").unwrap() };
+//! f();
+//! let f: dlopen_rs::Symbol<extern "C" fn()> =
+//! 	unsafe { libexample.get("c_func_thread_local").unwrap() };
+//! f();
+//! let f: dlopen_rs::Symbol<extern "C" fn()> =
+//! 	unsafe { libexample.get("c_func_panic").unwrap() };
+//! f();
+//! ```
+
 #![cfg_attr(feature = "nightly", core_intrinsics)]
 #![cfg_attr(not(feature = "std"), no_std)]
 extern crate alloc;
@@ -22,7 +54,6 @@ mod unwind;
 use alloc::string::String;
 pub use types::{ELFLibrary, ExternLibrary, RelocatedLibrary, Symbol};
 
-// 因为unlikely只能在nightly版本的编译器中使用
 use alloc::alloc::LayoutError;
 #[cfg(not(feature = "nightly"))]
 use core::convert::identity as unlikely;
@@ -41,8 +72,8 @@ use elf::file::Class;
 )))]
 compile_error!("unsupport arch");
 
-cfg_match! {
-    cfg(target_pointer_width = "64")=>{
+cfg_if::cfg_if! {
+    if #[cfg(target_pointer_width = "64")]{
         const E_CLASS: Class = Class::ELF64;
         type Phdr = elf::segment::Elf64_Phdr;
         type Dyn = elf::dynamic::Elf64_Dyn;
@@ -52,8 +83,7 @@ cfg_match! {
         const REL_BIT: usize = 32;
         const PHDR_SIZE: usize = core::mem::size_of::<elf::segment::Elf64_Phdr>();
         const EHDR_SIZE: usize = core::mem::size_of::<elf::file::Elf64_Ehdr>();
-    }
-    _ =>{
+    }else{
         const E_CLASS: Class = Class::ELF32;
         type Phdr = elf::segment::Elf32_Phdr;
         type Dyn = elf::dynamic::Elf32_Dyn;
@@ -66,24 +96,20 @@ cfg_match! {
     }
 }
 
-const BUF_SIZE: usize = EHDR_SIZE + 8 * PHDR_SIZE;
-
 use elf::parse::ParseError;
-use snafu::prelude::*;
 
-#[derive(Debug, Snafu)]
-#[non_exhaustive]
+#[derive(Debug)]
 pub enum Error {
     #[cfg(feature = "std")]
     IOError {
-        source: std::io::Error,
+        err: std::io::Error,
     },
     ParseError {
-        msg: ParseError,
+        err: ParseError,
     },
     #[cfg(any(feature = "libgcc", feature = "libunwind"))]
     GimliError {
-        msg: gimli::Error,
+        err: gimli::Error,
     },
     LoaderError {
         msg: String,
@@ -99,24 +125,45 @@ pub enum Error {
     },
     #[cfg(feature = "mmap")]
     Errno {
-        source: nix::Error,
+        err: nix::Error,
     },
     LayoutError {
-        source: LayoutError,
+        err: LayoutError,
     },
 }
 
 #[cold]
 #[inline(never)]
 fn parse_err_convert(err: elf::ParseError) -> Error {
-    Error::ParseError { msg: err }
+    Error::ParseError { err }
 }
 
 #[cfg(any(feature = "libgcc", feature = "libunwind"))]
 #[cold]
 #[inline(never)]
 fn gimli_err_convert(err: gimli::Error) -> Error {
-    Error::GimliError { msg: err }
+    Error::GimliError { err }
+}
+
+#[cfg(feature = "std")]
+#[cold]
+#[inline(never)]
+fn io_err_convert(err: std::io::Error) -> Error {
+    Error::IOError { err }
+}
+
+#[cfg(not(feature = "mmap"))]
+#[cold]
+#[inline(never)]
+fn layout_err_convert(err: alloc::alloc::LayoutError) -> Error {
+    Error::LayoutError { err }
+}
+
+#[cfg(feature = "mmap")]
+#[cold]
+#[inline(never)]
+fn mmap_err_convert(err: nix::Error) -> Error {
+    Error::Errno { err }
 }
 
 #[cold]

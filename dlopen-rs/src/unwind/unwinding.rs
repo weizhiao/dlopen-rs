@@ -9,6 +9,14 @@ use unwinding::custom_eh_frame_finder::{
     set_custom_eh_frame_finder, EhFrameFinder, FrameInfo, FrameInfoKind,
 };
 
+
+impl ELFUnwind {
+    pub(crate) fn new(phdr: &Phdr, segments: &ELFSegments) -> Result<ELFUnwind> {
+        let eh_frame_hdr = segments.base() + phdr.p_vaddr as usize;
+        Ok(ELFUnwind(eh_frame_hdr))
+    }
+}
+
 impl Drop for ELFUnwind {
     fn drop(&mut self) {
         let mut eh_finder = EH_FINDER.unwind_infos.write();

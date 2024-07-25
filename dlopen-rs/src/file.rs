@@ -1,4 +1,4 @@
-use crate::{ehdr::ELFEhdr, Phdr, Result};
+use crate::{ehdr::ELFEhdr, Phdr, Result, EHDR_SIZE, PHDR_SIZE};
 
 pub(crate) enum FileType {
     #[cfg(feature = "std")]
@@ -11,8 +11,11 @@ pub(crate) struct ELFFile {
 }
 
 #[cfg(feature = "std")]
+const BUF_SIZE: usize = EHDR_SIZE + 11 * PHDR_SIZE;
+
+#[cfg(feature = "std")]
 pub(crate) struct Buf {
-    stack: core::mem::MaybeUninit<[u8; crate::BUF_SIZE]>,
+    stack: core::mem::MaybeUninit<[u8; BUF_SIZE]>,
     heap: Vec<u8>,
 }
 
@@ -49,10 +52,9 @@ impl ELFFile {
     #[cfg(feature = "std")]
     #[inline]
     pub(crate) fn from_file<P: AsRef<std::ffi::OsStr>>(path: P) -> Result<ELFFile> {
-        use crate::IOSnafu;
-		use snafu::ResultExt;
+        use crate::io_err_convert;
         use std::fs::File;
-        let file = File::open(path.as_ref()).context(IOSnafu)?;
+        let file = File::open(path.as_ref()).map_err(io_err_convert)?;
         Ok(ELFFile {
             context: FileType::Fd(file),
         })
@@ -70,15 +72,14 @@ impl ELFFile {
         let phdrs = match &mut self.context {
             #[cfg(feature = "std")]
             FileType::Fd(file) => {
-                use crate::IOSnafu;
-				use snafu::ResultExt;
+                use crate::io_err_convert;
                 use std::{
                     io::Seek,
                     io::{Read, SeekFrom},
                 };
 
                 let stack_buf = buf.stack();
-                file.read_exact(stack_buf).context(IOSnafu)?;
+                file.read_exact(stack_buf).map_err(io_err_convert)?;
                 let ehdr = ELFEhdr::new(&stack_buf)?;
                 ehdr.validate()?;
 
@@ -86,13 +87,13 @@ impl ELFFile {
                 let phdrs_num = ehdr.e_phnum();
                 let (phdr_start, phdr_end) = ehdr.phdr_range();
                 let phdrs_size = phdr_end - phdr_start;
-                let phdrs = if phdr_end > crate::BUF_SIZE {
+                let phdrs = if phdr_end > BUF_SIZE {
                     let heap = buf.heap();
                     heap.reserve(phdrs_size);
                     unsafe { heap.set_len(phdrs_size) };
                     file.seek(SeekFrom::Start(phdr_start as _))
-                        .context(IOSnafu)?;
-                    file.read_exact(heap).context(IOSnafu)?;
+                        .map_err(io_err_convert)?;
+                    file.read_exact(heap).map_err(io_err_convert)?;
                     unsafe { core::slice::from_raw_parts(buf.heap_ptr() as _, phdrs_num) }
                 } else {
                     unsafe {

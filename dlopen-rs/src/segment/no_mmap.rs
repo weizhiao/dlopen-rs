@@ -1,16 +1,13 @@
-use core::{
-    alloc::Layout, ptr::NonNull
-};
-
+use core::{alloc::Layout, ptr::NonNull};
 
 use alloc::alloc::dealloc;
 use elf::abi::PT_LOAD;
-use snafu::ResultExt;
 
 use crate::{
     file::{ELFFile, FileType},
+    layout_err_convert,
     segment::{MASK, PAGE_SIZE},
-    unlikely, LayoutSnafu, Phdr, Result,
+    unlikely, Phdr, Result,
 };
 
 const ALIGN: usize = 8;
@@ -62,8 +59,8 @@ impl ELFSegments {
 
         let len = addr_max - addr_min + PAGE_SIZE;
 
-		// 鉴于有些平台无法分配出PAGE_SIZE对齐的内存，因此这里分配大一些的内存手动对齐
-        let layout = Layout::from_size_align(len, ALIGN).context(LayoutSnafu)?;
+        // 鉴于有些平台无法分配出PAGE_SIZE对齐的内存，因此这里分配大一些的内存手动对齐
+        let layout = Layout::from_size_align(len, ALIGN).map_err(layout_err_convert)?;
         let memory = unsafe { alloc::alloc::alloc(layout) };
         let align_offset = ((memory as usize + PAGE_SIZE - 1) & MASK) - memory as usize;
 
@@ -100,11 +97,10 @@ impl ELFSegments {
         match &mut file.context {
             #[cfg(feature = "std")]
             FileType::Fd(file) => {
-                use crate::IOSnafu;
                 use std::io::{Read, Seek, SeekFrom};
                 file.seek(SeekFrom::Start(this_off.try_into().unwrap()))
-                    .context(IOSnafu)?;
-                file.read_exact(this_mem).context(IOSnafu)?;
+                    .map_err(io_err_convert)?;
+                file.read_exact(this_mem).map_err(io_err_convert)?;
             }
             FileType::Binary(file) => {
                 this_mem.copy_from_slice(&file[this_off..this_off_end]);

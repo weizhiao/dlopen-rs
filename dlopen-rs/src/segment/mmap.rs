@@ -1,27 +1,25 @@
 use std::ptr::NonNull;
 
-use elf::abi::{PF_R, PF_W, PF_X, PT_LOAD};
-use snafu::ResultExt;
-
 use crate::{
     file::{ELFFile, FileType},
+    mmap_err_convert,
     segment::{MASK, PAGE_SIZE},
     unlikely, Phdr, Result,
 };
+use elf::abi::{PF_R, PF_W, PF_X, PT_LOAD};
+use nix::sys::mman;
 
 use super::{ELFRelro, ELFSegments};
 
 impl ELFRelro {
     #[inline]
     pub(crate) fn relro(&self) -> Result<()> {
-        use crate::ErrnoSnafu;
-        use nix::sys::mman;
         let end = (self.addr + self.len + PAGE_SIZE - 1) & MASK;
         let start = self.addr & MASK;
         let start_addr = unsafe { NonNull::new_unchecked(start as _) };
         unsafe {
             mman::mprotect(start_addr, end - start, mman::ProtFlags::PROT_READ)
-                .context(ErrnoSnafu)?;
+                .map_err(mmap_err_convert)?;
         }
 
         Ok(())
@@ -30,7 +28,6 @@ impl ELFRelro {
 
 impl Drop for ELFSegments {
     fn drop(&mut self) {
-        use nix::sys::mman;
         if self.len != isize::MAX as _ {
             unsafe {
                 mman::munmap(self.memory, self.len).unwrap();
@@ -39,7 +36,6 @@ impl Drop for ELFSegments {
     }
 }
 
-#[cfg(feature = "mmap")]
 impl ELFSegments {
     #[inline]
     fn map_prot(prot: u32) -> nix::sys::mman::ProtFlags {
@@ -59,9 +55,7 @@ impl ELFSegments {
 
     #[inline]
     pub(crate) fn new(phdrs: &[Phdr], file: &ELFFile) -> Result<ELFSegments> {
-        use crate::ErrnoSnafu;
         use core::num::NonZeroUsize;
-        use nix::sys::mman;
 
         let mut addr_min = usize::MAX;
         let mut addr_max = 0;
@@ -101,7 +95,7 @@ impl ELFSegments {
                     file,
                     addr_min_off as _,
                 )
-                .context(ErrnoSnafu)?
+                .map_err(mmap_err_convert)?
             },
             FileType::Binary(_) => unsafe {
                 mman::mmap_anonymous(
@@ -110,7 +104,7 @@ impl ELFSegments {
                     mman::ProtFlags::PROT_WRITE,
                     mman::MapFlags::MAP_PRIVATE | mman::MapFlags::MAP_ANON,
                 )
-                .context(ErrnoSnafu)?
+                .map_err(mmap_err_convert)?
             },
         } as _;
         Ok(ELFSegments {
@@ -122,9 +116,7 @@ impl ELFSegments {
 
     #[inline]
     pub(crate) fn load_segment(&self, phdr: &Phdr, file: &ELFFile) -> Result<()> {
-        use crate::ErrnoSnafu;
         use core::num::NonZeroUsize;
-        use nix::sys::mman;
 
         // 映射的起始地址与结束地址都是页对齐的
         let addr_min = (-self.offset) as usize;
@@ -150,7 +142,7 @@ impl ELFSegments {
                             file,
                             this_off as _,
                         )
-                        .context(ErrnoSnafu)?
+                        .map_err(mmap_err_convert)?
                     };
                     //将类似bss节的内存区域的值设置为0
                     if unlikely(phdr.p_filesz != phdr.p_memsz) {
@@ -172,7 +164,7 @@ impl ELFSegments {
                                     this_port,
                                     mman::MapFlags::MAP_PRIVATE | mman::MapFlags::MAP_FIXED,
                                 )
-                                .context(ErrnoSnafu)?;
+                                .map_err(mmap_err_convert)?;
                             }
                         }
 
@@ -197,7 +189,7 @@ impl ELFSegments {
                         this_len.get(),
                         this_port,
                     )
-                    .context(ErrnoSnafu)?
+                    .map_err(mmap_err_convert)?
                 }
             }
         }

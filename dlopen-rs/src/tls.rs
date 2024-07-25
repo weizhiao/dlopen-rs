@@ -1,6 +1,6 @@
 use std::{
     alloc::{dealloc, Layout},
-    mem::MaybeUninit,
+    mem::{size_of, MaybeUninit},
     os::raw::c_void,
 };
 

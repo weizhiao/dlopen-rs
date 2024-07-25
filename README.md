@@ -1,6 +1,6 @@
 # dlopen-rs
 
-dLopen-rs supports loading dynamic libraries from memory and files, supports `no_std` environments, and does not rely on the dynamic linker `ldso`
+dlopen-rs supports loading dynamic libraries from memory and files, supports `no_std` environments, and does not rely on the dynamic linker `ldso`
 
 ```rust
 use dlopen_rs::ELFLibrary;
@@ -31,3 +31,5 @@ fn main() {
     f();
 }
 ```
+
+There is currently no support for using backtrace in loaded dynamic library code, and there is no support for debugging loaded dynamic libraries using gdb

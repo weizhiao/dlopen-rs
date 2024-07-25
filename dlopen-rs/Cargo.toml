@@ -2,10 +2,13 @@
 name = "dlopen-rs"
 version = "0.1.0"
 edition = "2021"
-authors = ["wzhao"]
+authors = ["wzhao <1207410841@qq.com>"]
 readme = "../README.md"
+repository = "https://github.com/weizhiao/dlopen-rs"
+keywords = ["dlopen", "so", "elf", "ldso"]
+categories = ["no-std", "os", "embedded"]
 license = "Apache-2.0"
-description = "A library for loading dynamic libraries from memory and files"
+description = "A library for loading elf dynamic libraries from memory and files"
 
 [dev-dependencies]
 libloading = "0.8.0"
@@ -33,11 +36,6 @@ version = '0.14'
 default-features = false
 features = ['ahash', 'inline-more']
 
-[dependencies.snafu]
-version = '0.8'
-default-features = false
-features = ['rust_1_61', 'unstable-core-error']
-
 [dependencies.nix]
 version = '0.29'
 default-features = false
@@ -53,17 +51,21 @@ features = ['macros']
 version = "0.7.4"
 default-features = false
 
+[dependencies]
+cfg-if = '1.0'
+
 [features]
-default = ["libgcc", "load_self", "tls"]
+default = ["load_self", "mmap", "tls", "libgcc"]
 
 # enable load the dso of the program itself
-load_self = ["mmap"]
+load_self = ["std", "dep:nix"]
 # enable std
 std = []
 # enable this on platforms that support mmap
 mmap = ["dep:nix", "std"]
 # enable thread local storage
-tls = []
+tls = ["std", "dep:nix"]
+# enable this on when you use the nightly compiler
 nightly = []
 # enable this when you want to use the exception handling mechanism provided by dlopen-rs
 unwinding = ["dep:unwinding", "dep:spin"]
