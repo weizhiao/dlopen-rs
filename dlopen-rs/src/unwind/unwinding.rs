@@ -1,14 +1,15 @@
 use core::{ops::Range, sync::atomic::AtomicBool};
 
-use crate::segment::ELFSegments;
+use crate::{segment::ELFSegments, Phdr, Result};
 
-use super::ELFUnwind;
 use hashbrown::{hash_table::Entry, HashTable};
 use spin::RwLock;
 use unwinding::custom_eh_frame_finder::{
     set_custom_eh_frame_finder, EhFrameFinder, FrameInfo, FrameInfoKind,
 };
 
+#[derive(Debug)]
+pub(crate) struct ELFUnwind(usize);
 
 impl ELFUnwind {
     pub(crate) fn new(phdr: &Phdr, segments: &ELFSegments) -> Result<ELFUnwind> {
