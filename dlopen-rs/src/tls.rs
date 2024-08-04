@@ -8,7 +8,11 @@ use nix::libc::{
     pthread_getspecific, pthread_key_create, pthread_key_delete, pthread_key_t, pthread_setspecific,
 };
 
-use crate::{segment::ELFSegments, Phdr};
+use crate::{
+    arch::{TLSIndex, TLS_DTV_OFFSET},
+    segment::ELFSegments,
+    Phdr,
+};
 
 #[derive(Debug)]
 pub(crate) struct ELFTLS {
@@ -55,24 +59,20 @@ impl Drop for ELFTLS {
     }
 }
 
-#[repr(C)]
-pub(crate) struct TLSArg<'a> {
-    tls: &'a ELFTLS,
-}
-
-pub(crate) unsafe extern "C" fn tls_get_addr(args: &TLSArg) -> *const u8 {
-    let val = pthread_getspecific(args.tls.key);
+pub(crate) unsafe extern "C" fn tls_get_addr(tls_index: &TLSIndex) -> *const u8 {
+    let tls = &*(tls_index.ti_module as *const ELFTLS);
+    let val = pthread_getspecific(tls.key);
     let data = if val.is_null() {
-        let layout = args.tls.layout;
+        let layout = tls.layout;
         let memory = alloc::alloc::alloc_zeroed(layout);
         memory.cast::<Layout>().write(layout);
-        let data = memory.add(args.tls.offset);
-        data.copy_from_nonoverlapping(args.tls.image, args.tls.len);
-        pthread_setspecific(args.tls.key, memory.cast());
+        let data = memory.add(tls.offset);
+        data.copy_from_nonoverlapping(tls.image, tls.len);
+        pthread_setspecific(tls.key, memory.cast());
         data
     } else {
-        val.add(args.tls.offset).cast()
+        val.add(tls.offset).cast()
     };
 
-    data
+    data.add(tls_index.ti_offset.wrapping_add(TLS_DTV_OFFSET))
 }

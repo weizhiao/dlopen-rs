@@ -20,25 +20,25 @@ pub(crate) struct ELFRelocation {
 }
 
 impl ELFLibrary {
-	/// use internal dependent libraries to relocate the current library
-	/// # Examples
+    /// use internal dependent libraries to relocate the current library
+    /// # Examples
     ///
     ///
     /// ```no_run
     /// # use ::dlopen_rs::ELFLibrary;
-	/// let libc = ELFLibrary::load_self("libc").unwrap();
+    /// let libc = ELFLibrary::load_self("libc").unwrap();
     /// let libgcc = ELFLibrary::load_self("libgcc").unwrap();
     /// let lib = ELFLibrary::from_file("/path/to/awesome.module")
-	/// 	.unwrap()
-	/// 	.relocate(&[libgcc, libc])
-	///		.unwrap();
+    /// 	.unwrap()
+    /// 	.relocate(&[libgcc, libc])
+    ///		.unwrap();
     /// ```
     ///
     pub fn relocate(self, internal_libs: &[RelocatedLibrary]) -> Result<RelocatedLibrary> {
         self.relocate_with(internal_libs, None)
     }
 
-	/// use internal and external dependency libraries to relocate the current library
+    /// use internal and external dependency libraries to relocate the current library
     pub fn relocate_with(
         self,
         internal_libs: &[RelocatedLibrary],
@@ -62,11 +62,11 @@ impl ELFLibrary {
             S Represents the value of the symbol whose index resides in the relocation entry.
         */
 
-        // 因为REL_IRELATIVE的存在，对glibc来说rela和pltrel的重定位是有先后顺序的
-        // 不过musl中没有出现过REL_IRELATIVE的重定位类型，我想这可能是libc实现的问题？
         for rela in rela.chain(pltrel) {
             let r_type = rela.r_info as usize & REL_MASK;
             match r_type as _ {
+                // do nothing
+                REL_NONE => {}
                 // REL_GOT/REL_JUMP_SLOT: S  REL_SYMBOLIC: S + A
                 REL_JUMP_SLOT | REL_GOT | REL_SYMBOLIC => {
                     let r_sym = rela.r_info as usize >> REL_BIT;
@@ -100,11 +100,11 @@ impl ELFLibrary {
                                 }
 
                                 if let Some(libs) = external_libs.as_ref() {
-									for lib in libs.iter() {
-										if let Some(sym) = lib.get_sym(name) {
-											return Some(sym);
-										}
-									}
+                                    for lib in libs.iter() {
+                                        if let Some(sym) = lib.get_sym(name) {
+                                            return Some(sym);
+                                        }
+                                    }
                                 }
                                 None
                             })
@@ -130,27 +130,30 @@ impl ELFLibrary {
                     };
                     unsafe { rel_addr.write(self.segments().base() + rela.r_addend as usize) }
                 }
-                // indirect( B + A )
-                REL_IRELATIVE => {
-                    let rel_addr = unsafe {
-                        self.segments().as_mut_ptr().add(rela.r_offset as usize) as *mut usize
-                    };
-                    let ifunc: fn() -> usize = unsafe {
-                        core::mem::transmute(self.segments().base() + rela.r_addend as usize)
-                    };
-                    unsafe { rel_addr.write(ifunc()) }
-                }
-
                 #[cfg(feature = "tls")]
                 REL_DTPMOD => {
                     let rel_addr = unsafe {
                         self.segments().as_mut_ptr().add(rela.r_offset as usize) as *mut usize
                     };
-                    unsafe {
-                        rel_addr.write(self.tls().as_ref().unwrap().as_ref()
-                            as *const crate::tls::ELFTLS
-                            as usize)
-                    }
+                    unsafe { rel_addr.write(self.tls() as usize) }
+                }
+                #[cfg(feature = "tls")]
+                REL_TLSDESC => {
+					todo!()
+                    // use crate::arch::TLSIndex;
+                    // let tls_index = Box::new(TLSIndex {
+                    //     ti_module: self.tls() as usize,
+                    //     ti_offset: rela.r_addend as usize,
+                    // });
+                    // let rel_addr = unsafe {
+                    //     self.segments().as_mut_ptr().add(rela.r_offset as usize) as *mut usize
+                    // };
+                    // unsafe {
+                    //     rel_addr.write(crate::tls::tls_get_addr as usize);
+                    //     rel_addr
+                    //         .add(1)
+                    //         .write(Box::leak(tls_index) as *const TLSIndex as usize)
+                    // };
                 }
                 _ => {
                     // REL_TPOFF：这种类型的重定位明显做不到，它是为静态模型设计的，这种方式
@@ -180,6 +183,10 @@ impl ELFLibrary {
             relro.relro()?;
         }
 
-        Ok(RelocatedLibrary::new(self, internal_libs.to_vec(), external_libs))
+        Ok(RelocatedLibrary::new(
+            self,
+            internal_libs.to_vec(),
+            external_libs,
+        ))
     }
 }

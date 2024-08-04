@@ -18,7 +18,7 @@ use crate::{
 };
 
 impl ELFSegments {
-    pub(crate) fn dump(addr: usize) -> ELFSegments {
+    pub(crate) fn dummy(addr: usize) -> ELFSegments {
         ELFSegments {
             memory: unsafe { NonNull::new_unchecked(addr as *mut _) },
             offset: 0,
@@ -49,7 +49,7 @@ impl ELFLibrary {
             if cur_name.contains(name) {
                 let data = &mut payload.data as *mut ManuallyDrop<CommonInner>;
                 let phdrs = core::slice::from_raw_parts(info.dlpi_phdr, info.dlpi_phnum as usize);
-                let segments = ELFSegments::dump(info.dlpi_addr as usize);
+                let segments = ELFSegments::dummy(info.dlpi_addr as usize);
 
                 let base = segments.base();
                 let mut dynamics = None;

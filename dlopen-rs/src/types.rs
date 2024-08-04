@@ -131,8 +131,8 @@ impl ELFLibrary {
 
     #[inline]
     #[cfg(feature = "tls")]
-    pub(crate) fn tls(&self) -> &Option<Box<crate::tls::ELFTLS>> {
-        &self.inner.common.tls
+    pub(crate) fn tls(&self) -> *const crate::tls::ELFTLS {
+        self.inner.common.tls.as_ref().unwrap().as_ref() as *const crate::tls::ELFTLS
     }
 
     #[inline]
@@ -254,8 +254,9 @@ impl Drop for RelocatedLibrary {
 pub trait ExternLibrary: Debug {
     /// Get the symbol of the dynamic library, and the return value is the address of the symbol
     /// # Examples
-    /// #[derive(Debug, Clone)]
+    ///
     /// ```
+    /// #[derive(Debug, Clone)]
     /// struct MyLib(Arc<Library>);
     ///
     /// impl ExternLibrary for MyLib {
