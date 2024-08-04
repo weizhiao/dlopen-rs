@@ -8,8 +8,8 @@ use alloc::{boxed::Box, format, sync::Arc, vec::Vec};
 use elf::string_table::StringTable;
 
 use crate::{
-    file::ELFFile, hashtable::ELFHashTable, relocation::ELFRelocation, segment::ELFSegments,
-    unwind::ELFUnwind, ELFSymbol, Error, Result,
+    file::ELFFile, find_symbol_error, hashtable::ELFHashTable, relocation::ELFRelocation,
+    segment::ELFSegments, unwind::ELFUnwind, ELFSymbol, Result,
 };
 
 #[derive(Debug)]
@@ -232,9 +232,7 @@ impl RelocatedLibrary {
                 ptr: sym as _,
                 pd: PhantomData,
             })
-            .ok_or(Error::FindSymbolError {
-                msg: format!("can not find symbol:{}", name),
-            })
+            .ok_or(find_symbol_error(format!("can not find symbol:{}", name)))
     }
 }
 

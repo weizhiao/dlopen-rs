@@ -4,7 +4,7 @@
 //!
 //! There is currently no support for using backtrace in loaded dynamic library code,
 //! and there is no support for debugging loaded dynamic libraries using gdb
-//! 
+//!
 //! # Examples
 //! ```
 //! use dlopen_rs::ELFLibrary;
@@ -17,17 +17,17 @@
 //!		.relocate(&[libgcc, libc])
 //!		.unwrap();
 //!
-//! let f: dlopen_rs::Symbol<extern "C" fn(i32) -> i32> =
-//! 	unsafe { libexample.get("c_fun_add_two").unwrap() };
+//! let f = unsafe {
+//! 	libexample
+//! 	.get::<extern "C" fn(i32) -> i32>("c_fun_add_two")
+//! 	.unwrap()
+//! };
 //! println!("{}", f(2));
-//! let f: dlopen_rs::Symbol<extern "C" fn()> =
-//! 	unsafe { libexample.get("c_fun_print_something_else").unwrap() };
-//! f();
-//! let f: dlopen_rs::Symbol<extern "C" fn()> =
-//! 	unsafe { libexample.get("c_func_thread_local").unwrap() };
-//! f();
-//! let f: dlopen_rs::Symbol<extern "C" fn()> =
-//! 	unsafe { libexample.get("c_func_panic").unwrap() };
+//! let f = unsafe {
+//! 	libexample
+//! 	.get::<extern "C" fn()>("c_fun_print_something_else")
+//! 	.unwrap()
+//! };
 //! f();
 //! ```
 #![cfg_attr(feature = "nightly", allow(internal_features))]
@@ -51,10 +51,9 @@ mod tls;
 mod types;
 mod unwind;
 
-use alloc::string::String;
+use alloc::string::{String, ToString};
 pub use types::{ELFLibrary, ExternLibrary, RelocatedLibrary, Symbol};
 
-use alloc::alloc::LayoutError;
 #[cfg(not(feature = "nightly"))]
 use core::convert::identity as unlikely;
 #[cfg(feature = "nightly")]
@@ -94,23 +93,27 @@ cfg_if::cfg_if! {
     }
 }
 
-use elf::parse::ParseError;
-
 #[derive(Debug)]
 pub enum Error {
     #[cfg(feature = "std")]
     IOError {
         err: std::io::Error,
     },
-    ParseError {
-        err: ParseError,
+    #[cfg(feature = "mmap")]
+    MmapError {
+        err: nix::Error,
     },
     #[cfg(any(feature = "libgcc", feature = "libunwind"))]
     GimliError {
         err: gimli::Error,
     },
-    LoaderError {
+    #[cfg(feature = "load_self")]
+    FindLibError {
         msg: String,
+    },
+    #[cfg(feature = "tls")]
+    TLSError {
+        msg: &'static str,
     },
     RelocateError {
         msg: String,
@@ -118,62 +121,79 @@ pub enum Error {
     FindSymbolError {
         msg: String,
     },
-    ValidateError {
+    ParseDynamicError {
+        msg: &'static str,
+    },
+    ParseEhdrError {
         msg: String,
     },
-    #[cfg(feature = "mmap")]
-    Errno {
-        err: nix::Error,
-    },
-    LayoutError {
-        err: LayoutError,
-    },
-}
-
-#[cold]
-#[inline(never)]
-fn parse_err_convert(err: elf::ParseError) -> Error {
-    Error::ParseError { err }
-}
-
-#[cfg(any(feature = "libgcc", feature = "libunwind"))]
-#[cold]
-#[inline(never)]
-fn gimli_err_convert(err: gimli::Error) -> Error {
-    Error::GimliError { err }
 }
 
 #[cfg(feature = "std")]
 #[cold]
 #[inline(never)]
-fn io_err_convert(err: std::io::Error) -> Error {
+fn io_err(err: std::io::Error) -> Error {
     Error::IOError { err }
-}
-
-#[cfg(not(feature = "mmap"))]
-#[cold]
-#[inline(never)]
-fn layout_err_convert(err: alloc::alloc::LayoutError) -> Error {
-    Error::LayoutError { err }
 }
 
 #[cfg(feature = "mmap")]
 #[cold]
 #[inline(never)]
-fn mmap_err_convert(err: nix::Error) -> Error {
-    Error::Errno { err }
+fn mmap_error(err: nix::Error) -> Error {
+    Error::MmapError { err }
+}
+
+#[cfg(any(feature = "libgcc", feature = "libunwind"))]
+#[cold]
+#[inline(never)]
+fn gimli_error(err: gimli::Error) -> Error {
+    Error::GimliError { err }
+}
+
+#[cfg(feature = "tls")]
+#[cold]
+#[inline(never)]
+fn tls_error(msg: &'static str) -> Error {
+    Error::TLSError { msg }
+}
+
+#[cfg(feature = "load_self")]
+#[cold]
+#[inline(never)]
+fn find_lib_error(msg: impl ToString) -> Error {
+    Error::FindLibError {
+        msg: msg.to_string(),
+    }
 }
 
 #[cold]
 #[inline(never)]
-fn loader_error(msg: String) -> Error {
-    Error::LoaderError { msg }
+fn relocate_error(msg: impl ToString) -> Error {
+    Error::RelocateError {
+        msg: msg.to_string(),
+    }
 }
 
 #[cold]
 #[inline(never)]
-fn relocate_error(msg: String) -> Error {
-    Error::RelocateError { msg }
+fn find_symbol_error(msg: impl ToString) -> Error {
+    Error::FindSymbolError {
+        msg: msg.to_string(),
+    }
+}
+
+#[cold]
+#[inline(never)]
+fn parse_dynamic_error(msg: &'static str) -> Error {
+    Error::ParseDynamicError { msg }
+}
+
+#[cold]
+#[inline(never)]
+fn parse_ehdr_error(msg: impl ToString) -> Error {
+    Error::ParseEhdrError {
+        msg: msg.to_string(),
+    }
 }
 
 pub type Result<T> = core::result::Result<T, Error>;

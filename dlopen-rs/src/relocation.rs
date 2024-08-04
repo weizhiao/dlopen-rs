@@ -3,7 +3,6 @@ use crate::types::ExternLibrary;
 use crate::{arch::*, relocate_error};
 use crate::{
     builtin::BUILTIN,
-    parse_err_convert,
     types::{ELFLibrary, RelocatedLibrary},
     Rela, Result, REL_BIT, REL_MASK,
 };
@@ -78,7 +77,7 @@ impl ELFLibrary {
                         let name = self
                             .strtab()
                             .get(dynsym.st_name as usize)
-                            .map_err(parse_err_convert)?;
+                            .map_err(relocate_error)?;
 
                         let symbol = BUILTIN
                             .get(&name)
@@ -139,7 +138,7 @@ impl ELFLibrary {
                 }
                 #[cfg(feature = "tls")]
                 REL_TLSDESC => {
-					todo!()
+                    todo!()
                     // use crate::arch::TLSIndex;
                     // let tls_index = Box::new(TLSIndex {
                     //     ti_module: self.tls() as usize,

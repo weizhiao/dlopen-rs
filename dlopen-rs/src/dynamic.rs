@@ -1,5 +1,5 @@
-use crate::{loader_error, segment::ELFSegments, Dyn, Phdr, Rela, Result};
-use alloc::{string::ToString, vec::Vec};
+use crate::{parse_dynamic_error, segment::ELFSegments, Dyn, Phdr, Rela, Result};
+use alloc::vec::Vec;
 use elf::abi::*;
 
 pub(crate) struct ELFDynamic {
@@ -68,24 +68,24 @@ impl ELFDynamic {
         let hash_off = if let Some(hash_off) = hash_off {
             hash_off + base
         } else {
-            return Err(loader_error(
-                "dynamic section does not have DT_GNU_HASH".to_string(),
+            return Err(parse_dynamic_error(
+                "dynamic section does not have DT_GNU_HASH",
             ));
         };
 
         let symtab_off = if let Some(symtab_off) = symtab_off {
             symtab_off + base
         } else {
-            return Err(loader_error(
-                "dynamic section does not have DT_SYMTAB".to_string(),
+            return Err(parse_dynamic_error(
+                "dynamic section does not have DT_SYMTAB",
             ));
         };
 
         let strtab = if let Some(strtab_off) = strtab_off {
             &segments.as_mut_slice()[strtab_off..strtab_off + strtab_size.unwrap()]
         } else {
-            return Err(loader_error(
-                "dynamic section does not have DT_STRTAB".to_string(),
+            return Err(parse_dynamic_error(
+                "dynamic section does not have DT_STRTAB",
             ));
         };
 

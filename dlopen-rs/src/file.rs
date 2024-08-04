@@ -52,9 +52,9 @@ impl ELFFile {
     #[cfg(feature = "std")]
     #[inline]
     pub(crate) fn from_file<P: AsRef<std::ffi::OsStr>>(path: P) -> Result<ELFFile> {
-        use crate::io_err_convert;
+        use crate::io_err;
         use std::fs::File;
-        let file = File::open(path.as_ref()).map_err(io_err_convert)?;
+        let file = File::open(path.as_ref()).map_err(io_err)?;
         Ok(ELFFile {
             context: FileType::Fd(file),
         })
@@ -72,14 +72,14 @@ impl ELFFile {
         let phdrs = match &mut self.context {
             #[cfg(feature = "std")]
             FileType::Fd(file) => {
-                use crate::io_err_convert;
+                use crate::io_err;
                 use std::{
                     io::Seek,
                     io::{Read, SeekFrom},
                 };
 
                 let stack_buf = buf.stack();
-                file.read_exact(stack_buf).map_err(io_err_convert)?;
+                file.read_exact(stack_buf).map_err(io_err)?;
                 let ehdr = ELFEhdr::new(&stack_buf)?;
                 ehdr.validate()?;
 
@@ -92,8 +92,8 @@ impl ELFFile {
                     heap.reserve(phdrs_size);
                     unsafe { heap.set_len(phdrs_size) };
                     file.seek(SeekFrom::Start(phdr_start as _))
-                        .map_err(io_err_convert)?;
-                    file.read_exact(heap).map_err(io_err_convert)?;
+                        .map_err(io_err)?;
+                    file.read_exact(heap).map_err(io_err)?;
                     unsafe { core::slice::from_raw_parts(buf.heap_ptr() as _, phdrs_num) }
                 } else {
                     unsafe {

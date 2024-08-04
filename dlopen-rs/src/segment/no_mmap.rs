@@ -1,11 +1,10 @@
 use core::{alloc::Layout, ptr::NonNull};
 
-use alloc::alloc::dealloc;
+use alloc::alloc::{dealloc, handle_alloc_error};
 use elf::abi::PT_LOAD;
 
 use crate::{
     file::{ELFFile, FileType},
-    layout_err_convert,
     segment::{MASK, PAGE_SIZE},
     unlikely, Phdr, Result,
 };
@@ -60,8 +59,11 @@ impl ELFSegments {
         let len = addr_max - addr_min + PAGE_SIZE;
 
         // 鉴于有些平台无法分配出PAGE_SIZE对齐的内存，因此这里分配大一些的内存手动对齐
-        let layout = Layout::from_size_align(len, ALIGN).map_err(layout_err_convert)?;
+        let layout = unsafe { Layout::from_size_align_unchecked(len, ALIGN) };
         let memory = unsafe { alloc::alloc::alloc(layout) };
+        if memory.is_null() {
+            handle_alloc_error(layout);
+        }
         let align_offset = ((memory as usize + PAGE_SIZE - 1) & MASK) - memory as usize;
 
         let offset = align_offset as isize - addr_min as isize;

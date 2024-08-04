@@ -1,5 +1,4 @@
-use crate::{parse_err_convert, unlikely, Error, Result, EHDR_SIZE, E_CLASS};
-use alloc::string::ToString;
+use crate::{arch::EM_ARCH, parse_ehdr_error, unlikely, Result, EHDR_SIZE, E_CLASS};
 use elf::{
     abi::*,
     endian::NativeEndian,
@@ -14,41 +13,24 @@ impl ELFEhdr {
     pub(crate) fn new(data: &[u8]) -> Result<ELFEhdr> {
         let ident_buf = &data[..EI_NIDENT];
         let tail_buf = &data[EI_NIDENT..EHDR_SIZE];
-        let ident = parse_ident::<NativeEndian>(&ident_buf).map_err(parse_err_convert)?;
-        let ehdr = FileHeader::parse_tail(ident, &tail_buf).map_err(parse_err_convert)?;
+        let ident = parse_ident::<NativeEndian>(&ident_buf).map_err(parse_ehdr_error)?;
+        let ehdr = FileHeader::parse_tail(ident, &tail_buf).map_err(parse_ehdr_error)?;
         Ok(ELFEhdr { ehdr })
     }
 
     //验证elf头
     #[inline]
     pub(crate) fn validate(&self) -> Result<()> {
-        #[cfg(target_arch = "x86_64")]
-        const EM_ARCH: u16 = EM_X86_64;
-        #[cfg(target_arch = "x86")]
-        const EM_ARCH: u16 = EM_386;
-        #[cfg(target_arch = "aarch64")]
-        const EM_ARCH: u16 = EM_AARCH64;
-        #[cfg(target_arch = "arm")]
-        const EM_ARCH: u16 = EM_ARM;
-        #[cfg(any(target_arch = "riscv32", target_arch = "riscv64"))]
-        const EM_ARCH: u16 = EM_RISCV;
-
         if unlikely(self.ehdr.e_type != ET_DYN) {
-            return Err(Error::ValidateError {
-                msg: "file type mismatch".to_string(),
-            });
+            return Err(parse_ehdr_error("file type mismatch"));
         }
 
         if unlikely(self.ehdr.e_machine != EM_ARCH) {
-			return Err(Error::ValidateError {
-                msg: "arch type mismatch".to_string(),
-            });
+            return Err(parse_ehdr_error("file arch mismatch"));
         }
 
         if unlikely(self.ehdr.class != E_CLASS) {
-			return Err(Error::ValidateError {
-                msg: "class type mismatch".to_string(),
-            });
+            return Err(parse_ehdr_error("file class mismatch"));
         }
 
         Ok(())

@@ -1,5 +1,7 @@
 use elf::abi::*;
 
+pub(crate) const EM_ARCH: u16 = EM_X86_64;
+
 #[repr(C)]
 #[allow(unused)]
 pub(crate) struct TLSIndex {

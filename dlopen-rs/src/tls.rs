@@ -1,5 +1,5 @@
 use std::{
-    alloc::{dealloc, Layout},
+    alloc::{dealloc, handle_alloc_error, Layout},
     mem::{size_of, MaybeUninit},
     os::raw::c_void,
 };
@@ -11,7 +11,7 @@ use nix::libc::{
 use crate::{
     arch::{TLSIndex, TLS_DTV_OFFSET},
     segment::ELFSegments,
-    Phdr,
+    tls_error, Phdr, Result,
 };
 
 #[derive(Debug)]
@@ -24,7 +24,7 @@ pub(crate) struct ELFTLS {
 }
 
 impl ELFTLS {
-    pub(crate) unsafe fn new(phdr: &Phdr, segments: &ELFSegments) -> ELFTLS {
+    pub(crate) unsafe fn new(phdr: &Phdr, segments: &ELFSegments) -> Result<ELFTLS> {
         unsafe extern "C" fn dtor(ptr: *mut c_void) {
             if !ptr.is_null() {
                 let layout = ptr.cast::<Layout>().read();
@@ -34,7 +34,9 @@ impl ELFTLS {
 
         let mut key = MaybeUninit::uninit();
 
-        pthread_key_create(key.as_mut_ptr(), Some(dtor));
+        if pthread_key_create(key.as_mut_ptr(), Some(dtor)) != 0 {
+            return Err(tls_error("can not create tls"));
+        }
 
         let align = phdr.p_align as usize;
         let mut size = (size_of::<Layout>() + align - 1) & (-(align as isize) as usize);
@@ -43,13 +45,13 @@ impl ELFTLS {
         size += phdr.p_memsz as usize;
         let layout = Layout::from_size_align_unchecked(size, align);
 
-        ELFTLS {
+        Ok(ELFTLS {
             image: segments.as_mut_ptr().add(phdr.p_vaddr as usize),
             len: phdr.p_filesz as usize,
             key: key.assume_init(),
             layout,
             offset,
-        }
+        })
     }
 }
 
@@ -65,10 +67,15 @@ pub(crate) unsafe extern "C" fn tls_get_addr(tls_index: &TLSIndex) -> *const u8 
     let data = if val.is_null() {
         let layout = tls.layout;
         let memory = alloc::alloc::alloc_zeroed(layout);
+        if memory.is_null() {
+            handle_alloc_error(layout);
+        }
         memory.cast::<Layout>().write(layout);
         let data = memory.add(tls.offset);
         data.copy_from_nonoverlapping(tls.image, tls.len);
-        pthread_setspecific(tls.key, memory.cast());
+        if pthread_setspecific(tls.key, memory.cast()) != 0 {
+            return core::ptr::null();
+        }
         data
     } else {
         val.add(tls.offset).cast()

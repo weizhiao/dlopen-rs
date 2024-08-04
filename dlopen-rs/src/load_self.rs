@@ -10,11 +10,12 @@ use nix::libc::{dl_iterate_phdr, dl_phdr_info, size_t};
 
 use crate::{
     dynamic::ELFDynamic,
+    find_lib_error,
     hashtable::ELFHashTable,
-    loader_error,
+    parse_dynamic_error,
     segment::ELFSegments,
     types::{CommonInner, RelocatedLibraryInner},
-    ELFLibrary, RelocatedLibrary, Result,
+    ELFLibrary, Error, RelocatedLibrary, Result,
 };
 
 impl ELFSegments {
@@ -34,7 +35,7 @@ impl ELFLibrary {
     ///
     /// ```no_run
     /// # use ::dlopen_rs::ELFLibrary;
-	/// let libc = ELFLibrary::load_self("libc").unwrap();
+    /// let libc = ELFLibrary::load_self("libc").unwrap();
     /// ```
     pub fn load_self(name: &str) -> Result<RelocatedLibrary> {
         unsafe extern "C" fn callback(
@@ -47,7 +48,8 @@ impl ELFLibrary {
             let info = &*info;
             let cur_name = CStr::from_ptr(info.dlpi_name).to_str().unwrap();
             if cur_name.contains(name) {
-                let data = &mut payload.data as *mut ManuallyDrop<CommonInner>;
+                let payload_data = &mut payload.data as *mut ManuallyDrop<CommonInner>;
+                let payload_err = &mut payload.err as *mut ManuallyDrop<Error>;
                 let phdrs = core::slice::from_raw_parts(info.dlpi_phdr, info.dlpi_phnum as usize);
                 let segments = ELFSegments::dummy(info.dlpi_addr as usize);
 
@@ -57,14 +59,27 @@ impl ELFLibrary {
                     match phdr.p_type {
                         PT_DYNAMIC => {
                             dynamics = Some(
-                                ELFDynamic::new(core::mem::transmute(phdr), &segments).unwrap(),
+                                match ELFDynamic::new(core::mem::transmute(phdr), &segments) {
+                                    Ok(dynamics) => dynamics,
+                                    Err(err) => {
+                                        payload_err.write(ManuallyDrop::new(err));
+                                        return -1;
+                                    }
+                                },
                             )
                         }
                         _ => {}
                     }
                 }
 
-                let dynamics = dynamics.unwrap();
+                let dynamics = if let Some(dynamics) = dynamics {
+                    dynamics
+                } else {
+                    payload_err.write(ManuallyDrop::new(parse_dynamic_error(
+                        "elf file does not have dynamic",
+                    )));
+                    return -1;
+                };
 
                 // musl和glibc有所区别，glibc会返回real addr。
                 let symtab = dynamics.dynsym();
@@ -105,7 +120,7 @@ impl ELFLibrary {
                     tls: None,
                 });
 
-                data.write(common);
+                payload_data.write(common);
 
                 return 1;
             }
@@ -115,13 +130,16 @@ impl ELFLibrary {
         union PayLoad<'a> {
             name: &'a str,
             data: ManuallyDrop<CommonInner>,
+            err: ManuallyDrop<Error>,
         }
 
         let mut payload = PayLoad { name };
 
         let res = unsafe { dl_iterate_phdr(Some(callback), &mut payload as *mut PayLoad as _) };
         if res == 0 {
-            return Err(loader_error(format!("can not open self lib: {}", name)));
+            return Err(find_lib_error(format!("can not open self lib: {}", name)));
+        } else if res == -1 {
+            return Err(unsafe { ManuallyDrop::into_inner(payload.err) });
         }
 
         let common = unsafe { ManuallyDrop::into_inner(payload.data) };

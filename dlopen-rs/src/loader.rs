@@ -2,14 +2,14 @@ use crate::{
     dynamic::ELFDynamic,
     file::{Buf, ELFFile},
     hashtable::ELFHashTable,
-    loader_error,
+    parse_dynamic_error,
     relocation::ELFRelocation,
     segment::{ELFRelro, ELFSegments},
     types::{CommonInner, ELFLibraryInner},
     unwind::ELFUnwind,
     Result,
 };
-use alloc::{string::ToString, vec::Vec};
+use alloc::vec::Vec;
 use elf::abi::*;
 
 impl ELFLibraryInner {
@@ -36,7 +36,7 @@ impl ELFLibraryInner {
                 #[cfg(feature = "tls")]
                 PT_TLS => {
                     tls = Some(Box::new(unsafe {
-                        crate::tls::ELFTLS::new(phdr, &segments)
+                        crate::tls::ELFTLS::new(phdr, &segments)?
                     }))
                 }
                 _ => {}
@@ -50,7 +50,7 @@ impl ELFLibraryInner {
         let dynamics = if let Some(dynamics) = dynamics {
             dynamics
         } else {
-            return Err(loader_error("elf file does not have dynamic".to_string()));
+            return Err(parse_dynamic_error("elf file does not have dynamic"));
         }?;
 
         let strtab = elf::string_table::StringTable::new(dynamics.strtab());

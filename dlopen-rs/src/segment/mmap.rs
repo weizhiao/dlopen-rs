@@ -2,7 +2,7 @@ use std::ptr::NonNull;
 
 use crate::{
     file::{ELFFile, FileType},
-    mmap_err_convert,
+    mmap_error,
     segment::{MASK, PAGE_SIZE},
     unlikely, Phdr, Result,
 };
@@ -19,7 +19,7 @@ impl ELFRelro {
         let start_addr = unsafe { NonNull::new_unchecked(start as _) };
         unsafe {
             mman::mprotect(start_addr, end - start, mman::ProtFlags::PROT_READ)
-                .map_err(mmap_err_convert)?;
+                .map_err(mmap_error)?;
         }
 
         Ok(())
@@ -95,7 +95,7 @@ impl ELFSegments {
                     file,
                     addr_min_off as _,
                 )
-                .map_err(mmap_err_convert)?
+                .map_err(mmap_error)?
             },
             FileType::Binary(_) => unsafe {
                 mman::mmap_anonymous(
@@ -104,7 +104,7 @@ impl ELFSegments {
                     mman::ProtFlags::PROT_WRITE,
                     mman::MapFlags::MAP_PRIVATE | mman::MapFlags::MAP_ANON,
                 )
-                .map_err(mmap_err_convert)?
+                .map_err(mmap_error)?
             },
         } as _;
         Ok(ELFSegments {
@@ -142,7 +142,7 @@ impl ELFSegments {
                             file,
                             this_off as _,
                         )
-                        .map_err(mmap_err_convert)?
+                        .map_err(mmap_error)?
                     };
                     //将类似bss节的内存区域的值设置为0
                     if unlikely(phdr.p_filesz != phdr.p_memsz) {
@@ -164,15 +164,9 @@ impl ELFSegments {
                                     this_port,
                                     mman::MapFlags::MAP_PRIVATE | mman::MapFlags::MAP_FIXED,
                                 )
-                                .map_err(mmap_err_convert)?;
+                                .map_err(mmap_error)?;
                             }
                         }
-
-                        // 下面这段代码在加载libc时会遇到Bus error，我目前还不知道为什么，因此只能采用musl中的方式
-                        // let zero_start = (phdr.p_vaddr + phdr.p_filesz) as usize;
-                        // let zero_end = zero_start + (phdr.p_memsz - phdr.p_filesz) as usize;
-                        // let zero_mem = &mut self.as_mut_slice()[zero_start..zero_end];
-                        // zero_mem.fill(0);
                     }
                 }
             }
@@ -189,7 +183,7 @@ impl ELFSegments {
                         this_len.get(),
                         this_port,
                     )
-                    .map_err(mmap_err_convert)?
+                    .map_err(mmap_error)?
                 }
             }
         }
