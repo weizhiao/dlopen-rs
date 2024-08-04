@@ -35,6 +35,7 @@ optional = true
 version = '0.14'
 default-features = false
 features = ['ahash', 'inline-more']
+optional = true
 
 [dependencies.nix]
 version = '0.29'
@@ -65,10 +66,10 @@ std = []
 mmap = ["dep:nix", "std"]
 # enable this when you need to use thread local storage
 tls = ["std", "dep:nix"]
-# enable this on when you use the nightly compiler
+# enable this can make loading `faster`, but you'll need to use the `nightly` compiler
 nightly = []
 # enable this when you want to use the exception handling mechanism provided by dlopen-rs
-unwinding = ["dep:unwinding", "dep:spin"]
+unwinding = ["dep:unwinding", "dep:spin", "dep:hashbrown"]
 # enable this when program uses libgcc to handle exceptions
 libgcc = ["dep:gimli"]
 # enable this when program uses libunwind to handle exceptions

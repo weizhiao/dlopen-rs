@@ -30,8 +30,8 @@
 //! 	unsafe { libexample.get("c_func_panic").unwrap() };
 //! f();
 //! ```
-
-#![cfg_attr(feature = "nightly", core_intrinsics)]
+#![cfg_attr(feature = "nightly", allow(internal_features))]
+#![cfg_attr(feature = "nightly", feature(core_intrinsics))]
 #![cfg_attr(not(feature = "std"), no_std)]
 extern crate alloc;
 

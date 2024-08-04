@@ -14,7 +14,7 @@ Currently supports `x86_64`, `x86`, `RV64` and `AArch64`.
 | std          | Yes     | Enable `std` |
 | mmap         | Yes      | Enable this on platforms that support `mmap` |
 | tls         | Yes     | Enable this when you need to use `thread local storage` |
-| nightly | No      | Enable this on when you use the `nightly` compiler |
+| nightly | No      | Enable this can make loading `faster`, but you'll need to use the `nightly` compiler |
 | unwinding           | No      | Enable this when you want to use the exception handling mechanism provided by dlopen-rs  |
 | libgcc            | Yes      | Enable this when program uses `libgcc` to handle exceptions |
 | libunwind          | No     | Enable this when program uses `libunwind` to handle exceptions |
