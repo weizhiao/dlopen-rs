@@ -66,9 +66,7 @@ use elf::file::Class;
     target_arch = "x86_64",
     target_arch = "x86",
     target_arch = "aarch64",
-    target_arch = "riscv32",
     target_arch = "riscv64",
-    target_arch = "arm"
 )))]
 compile_error!("unsupport arch");
 

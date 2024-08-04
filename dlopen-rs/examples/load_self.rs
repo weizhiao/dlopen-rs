@@ -12,16 +12,27 @@ fn main() {
         .relocate(&[libgcc, libc])
         .unwrap();
 
-    let f: dlopen_rs::Symbol<extern "C" fn(i32) -> i32> = unsafe { libexample.get("c_fun_add_two").unwrap() };
+    let f = unsafe {
+        libexample
+            .get::<extern "C" fn(i32) -> i32>("c_fun_add_two")
+            .unwrap()
+    };
     println!("{}", f(2));
 
-    let g: dlopen_rs::Symbol<extern "C" fn()> =
-        unsafe { libexample.get("c_fun_print_something_else").unwrap() };
-    g();
-
-    let f: dlopen_rs::Symbol<extern "C" fn()> = unsafe { libexample.get("c_func_thread_local").unwrap() };
+    let f = unsafe {
+        libexample
+            .get::<extern "C" fn()>("c_fun_print_something_else")
+            .unwrap()
+    };
     f();
-	
-    let f: dlopen_rs::Symbol<extern "C" fn()> = unsafe { libexample.get("c_func_panic").unwrap() };
+
+    let f = unsafe {
+        libexample
+            .get::<extern "C" fn()>("c_func_thread_local")
+            .unwrap()
+    };
+    f();
+
+    let f = unsafe { libexample.get::<extern "C" fn()>("c_func_panic").unwrap() };
     f();
 }

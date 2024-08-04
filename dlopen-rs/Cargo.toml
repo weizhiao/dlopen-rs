@@ -1,6 +1,6 @@
 [package]
 name = "dlopen-rs"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["wzhao <1207410841@qq.com>"]
 readme = "../README.md"
@@ -63,7 +63,7 @@ load_self = ["std", "dep:nix"]
 std = []
 # enable this on platforms that support mmap
 mmap = ["dep:nix", "std"]
-# enable thread local storage
+# enable this when you need to use thread local storage
 tls = ["std", "dep:nix"]
 # enable this on when you use the nightly compiler
 nightly = []
