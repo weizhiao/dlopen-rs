@@ -1,6 +1,6 @@
 use core::ffi::c_void;
 
-use crate::{parse_ehframe_error, segment::ELFSegments, Phdr, Result};
+use crate::{segment::ELFSegments, Phdr, Result};
 #[derive(Debug)]
 pub(crate) struct ELFUnwind(usize);
 
@@ -15,8 +15,7 @@ impl ELFUnwind {
             &segments.as_mut_slice()[eh_frame_hdr_off..eh_frame_hdr_off + eh_frame_hdr_size],
             gimli::NativeEndian,
         )
-        .parse(&bases, core::mem::size_of::<usize>() as _)
-        .map_err(parse_ehframe_error)?;
+        .parse(&bases, core::mem::size_of::<usize>() as _)?;
         let eh_frame_addr = match eh_frame_hdr.eh_frame_ptr() {
             gimli::Pointer::Direct(x) => x as usize,
             gimli::Pointer::Indirect(x) => unsafe { *(x as *const _) },

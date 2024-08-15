@@ -32,18 +32,18 @@
 //! ```
 #![cfg_attr(feature = "nightly", allow(internal_features))]
 #![cfg_attr(feature = "nightly", feature(core_intrinsics))]
+#![cfg_attr(all(feature = "nightly", not(feature = "std")), feature(error_in_core))]
 #![cfg_attr(not(feature = "std"), no_std)]
 extern crate alloc;
 
 mod arch;
 mod builtin;
+mod dso;
 mod dynamic;
 mod ehdr;
-mod file;
 mod hashtable;
 #[cfg(feature = "load_self")]
 mod load_self;
-mod loader;
 mod relocation;
 mod segment;
 #[cfg(feature = "tls")]
@@ -56,6 +56,7 @@ pub use types::{ELFLibrary, ExternLibrary, RelocatedLibrary, Symbol};
 
 #[cfg(not(feature = "nightly"))]
 use core::convert::identity as unlikely;
+use core::fmt::Display;
 #[cfg(feature = "nightly")]
 use core::intrinsics::unlikely;
 
@@ -129,25 +130,68 @@ pub enum Error {
     },
 }
 
+impl Display for Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            #[cfg(feature = "std")]
+            Error::IOError { err } => write!(f, "{err}"),
+            #[cfg(feature = "mmap")]
+            Error::MmapError { err } => write!(f, "{err}"),
+            #[cfg(any(feature = "libgcc", feature = "libunwind"))]
+            Error::GimliError { err } => write!(f, "{err}"),
+            #[cfg(feature = "load_self")]
+            Error::FindLibError { msg } => write!(f, "{msg}"),
+            #[cfg(feature = "tls")]
+            Error::TLSError { msg } => write!(f, "{msg}"),
+            Error::RelocateError { msg } => write!(f, "{msg}"),
+            Error::FindSymbolError { msg } => write!(f, "{msg}"),
+            Error::ParseDynamicError { msg } => write!(f, "{msg}"),
+            Error::ParseEhdrError { msg } => write!(f, "{msg}"),
+        }
+    }
+}
+
 #[cfg(feature = "std")]
-#[cold]
-#[inline(never)]
-fn io_err(err: std::io::Error) -> Error {
-    Error::IOError { err }
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Error::IOError { err } => Some(err),
+			#[cfg(feature = "mmap")]
+            Error::MmapError { err } => Some(err),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(all(feature = "nightly", not(feature = "std")))]
+impl core::error::Error for Error {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        None
+    }
+}
+
+#[cfg(feature = "std")]
+impl From<std::io::Error> for Error {
+    #[cold]
+    fn from(value: std::io::Error) -> Self {
+        Error::IOError { err: value }
+    }
 }
 
 #[cfg(feature = "mmap")]
-#[cold]
-#[inline(never)]
-fn mmap_error(err: nix::Error) -> Error {
-    Error::MmapError { err }
+impl From<nix::Error> for Error {
+    #[cold]
+    fn from(value: nix::Error) -> Self {
+        Error::MmapError { err: value }
+    }
 }
 
 #[cfg(any(feature = "libgcc", feature = "libunwind"))]
-#[cold]
-#[inline(never)]
-fn gimli_error(err: gimli::Error) -> Error {
-    Error::GimliError { err }
+impl From<gimli::Error> for Error {
+	#[cold]
+    fn from(value: gimli::Error) -> Self {
+        Error::GimliError { err: value }
+    }
 }
 
 #[cfg(feature = "tls")]

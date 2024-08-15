@@ -8,14 +8,19 @@ use alloc::{boxed::Box, format, sync::Arc, vec::Vec};
 use elf::string_table::StringTable;
 
 use crate::{
-    file::ELFFile, find_symbol_error, hashtable::ELFHashTable, relocation::ELFRelocation,
-    segment::ELFSegments, unwind::ELFUnwind, ELFSymbol, Result,
+    dso::{binary::ELFBinary, SharedObject},
+    find_symbol_error,
+    hashtable::ELFHashTable,
+    relocation::ELFRelocation,
+    segment::ELFSegments,
+    unwind::ELFUnwind,
+    ELFSymbol, Result,
 };
 
 #[derive(Debug)]
 #[allow(unused)]
 pub(crate) struct ELFLibraryInner {
-    pub(crate) common: CommonInner,
+    pub(crate) common: CommonElfData,
     /// rela.dyn and rela.plt
     pub(crate) relocation: ELFRelocation,
     /// .init
@@ -28,7 +33,7 @@ pub(crate) struct ELFLibraryInner {
 
 #[derive(Debug)]
 #[allow(unused)]
-pub(crate) struct CommonInner {
+pub(crate) struct CommonElfData {
     /// .gnu.hash
     pub(crate) hashtab: ELFHashTable,
     /// .dynsym
@@ -48,7 +53,7 @@ pub(crate) struct CommonInner {
     pub(crate) tls: Option<Box<crate::tls::ELFTLS>>,
 }
 
-impl CommonInner {
+impl CommonElfData {
     pub(crate) fn get_sym(&self, name: &str) -> Option<&ELFSymbol> {
         let bytes = name.as_bytes();
         let name = if *bytes.last().unwrap() == 0 {
@@ -85,8 +90,10 @@ impl ELFLibrary {
     ///
     #[cfg(feature = "std")]
     pub fn from_file<P: AsRef<std::ffi::OsStr>>(path: P) -> Result<ELFLibrary> {
-        let file = ELFFile::from_file(path.as_ref())?;
-        let inner = ELFLibraryInner::load_library(file)?;
+        use crate::dso::SharedObject;
+
+        let mut file = crate::dso::file::ELFFile::new(path)?;
+        let inner = file.load()?;
         Ok(ELFLibrary { inner })
     }
 
@@ -100,11 +107,12 @@ impl ELFLibrary {
     /// let lib = ELFLibrary::from_binary(&bytes).unwarp();
     /// ```
     pub fn from_binary(bytes: &[u8]) -> Result<ELFLibrary> {
-        let file = ELFFile::from_binary(bytes);
-        let inner = ELFLibraryInner::load_library(file)?;
+        let mut file = ELFBinary::new(bytes);
+        let inner = file.load()?;
         Ok(ELFLibrary { inner })
     }
 
+    /// get the name of the dependent libraries
     pub fn needed_libs(&self) -> &Vec<&str> {
         &self.inner.needed_libs
     }
@@ -149,9 +157,9 @@ impl ELFLibrary {
 #[derive(Debug)]
 #[allow(unused)]
 pub(crate) struct RelocatedLibraryInner {
-    pub(crate) common: CommonInner,
-    pub(crate) internal_libs: Vec<RelocatedLibrary>,
-    pub(crate) external_libs: Option<Vec<Box<dyn ExternLibrary>>>,
+    pub(crate) common: CommonElfData,
+    pub(crate) internal_libs: Box<[RelocatedLibrary]>,
+    pub(crate) external_libs: Option<Box<[Box<dyn ExternLibrary>]>>,
 }
 
 #[derive(Debug, Clone)]
@@ -167,8 +175,8 @@ impl RelocatedLibrary {
     ) -> RelocatedLibrary {
         let inner = RelocatedLibraryInner {
             common: lib.inner.common,
-            internal_libs,
-            external_libs,
+            internal_libs: internal_libs.into_boxed_slice(),
+            external_libs: external_libs.map(|libs| libs.into_boxed_slice()),
         };
 
         RelocatedLibrary {
@@ -270,7 +278,7 @@ pub trait ExternLibrary: Debug {
     fn get_sym(&self, name: &str) -> Option<*const ()>;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Symbol<'lib, T: 'lib> {
     ptr: *mut (),
     pd: marker::PhantomData<&'lib T>,

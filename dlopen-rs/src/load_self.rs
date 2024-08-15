@@ -14,7 +14,7 @@ use crate::{
     hashtable::ELFHashTable,
     parse_dynamic_error,
     segment::ELFSegments,
-    types::{CommonInner, RelocatedLibraryInner},
+    types::{CommonElfData, RelocatedLibraryInner},
     ELFLibrary, Error, RelocatedLibrary, Result,
 };
 
@@ -48,7 +48,7 @@ impl ELFLibrary {
             let info = &*info;
             let cur_name = CStr::from_ptr(info.dlpi_name).to_str().unwrap();
             if cur_name.contains(name) {
-                let payload_data = &mut payload.data as *mut ManuallyDrop<CommonInner>;
+                let payload_data = &mut payload.data as *mut ManuallyDrop<CommonElfData>;
                 let payload_err = &mut payload.err as *mut ManuallyDrop<Error>;
                 let phdrs = core::slice::from_raw_parts(info.dlpi_phdr, info.dlpi_phnum as usize);
                 let segments = ELFSegments::dummy(info.dlpi_addr as usize);
@@ -108,7 +108,7 @@ impl ELFLibrary {
                 let strtab = elf::string_table::StringTable::new(strtab);
                 let symtab = symtab as _;
 
-                let common = ManuallyDrop::new(CommonInner {
+                let common = ManuallyDrop::new(CommonElfData {
                     hashtab,
                     symtab,
                     strtab,
@@ -129,7 +129,7 @@ impl ELFLibrary {
 
         union PayLoad<'a> {
             name: &'a str,
-            data: ManuallyDrop<CommonInner>,
+            data: ManuallyDrop<CommonElfData>,
             err: ManuallyDrop<Error>,
         }
 
@@ -146,7 +146,7 @@ impl ELFLibrary {
 
         let inner = RelocatedLibraryInner {
             common,
-            internal_libs: Vec::new(),
+            internal_libs: Vec::new().into_boxed_slice(),
             external_libs: None,
         };
         Ok(RelocatedLibrary {
