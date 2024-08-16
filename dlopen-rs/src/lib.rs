@@ -1,4 +1,3 @@
-//! The `elf` crate provides a pure-safe-rust interface for reading ELF object files.
 //! The `dopen_rs` crate supports loading dynamic libraries from memory and files,
 //! supports `no_std` environments, and does not rely on the dynamic linker `ldso`
 //!
@@ -36,31 +35,16 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 extern crate alloc;
 
-mod arch;
-mod builtin;
-mod dso;
-mod dynamic;
-mod ehdr;
-mod hashtable;
-#[cfg(feature = "load_self")]
-mod load_self;
-mod relocation;
-mod segment;
-#[cfg(feature = "tls")]
-mod tls;
-mod types;
-mod unwind;
+pub(crate) mod loader;
 
 use alloc::string::{String, ToString};
-pub use types::{ELFLibrary, ExternLibrary, RelocatedLibrary, Symbol};
+pub use loader::{ELFLibrary, ExternLibrary, RelocatedLibrary, Symbol};
 
 #[cfg(not(feature = "nightly"))]
 use core::convert::identity as unlikely;
 use core::fmt::Display;
 #[cfg(feature = "nightly")]
 use core::intrinsics::unlikely;
-
-use elf::file::Class;
 
 #[cfg(not(any(
     target_arch = "x86_64",
@@ -70,32 +54,9 @@ use elf::file::Class;
 )))]
 compile_error!("unsupport arch");
 
-cfg_if::cfg_if! {
-    if #[cfg(target_pointer_width = "64")]{
-        const E_CLASS: Class = Class::ELF64;
-        type Phdr = elf::segment::Elf64_Phdr;
-        type Dyn = elf::dynamic::Elf64_Dyn;
-        type Rela = elf::relocation::Elf64_Rela;
-        type ELFSymbol = elf::symbol::Elf64_Sym;
-        const REL_MASK: usize = 0xFFFFFFFF;
-        const REL_BIT: usize = 32;
-        const PHDR_SIZE: usize = core::mem::size_of::<elf::segment::Elf64_Phdr>();
-        const EHDR_SIZE: usize = core::mem::size_of::<elf::file::Elf64_Ehdr>();
-    }else{
-        const E_CLASS: Class = Class::ELF32;
-        type Phdr = elf::segment::Elf32_Phdr;
-        type Dyn = elf::dynamic::Elf32_Dyn;
-        type Rela = elf::relocation::Elf32_Rela;
-        type ELFSymbol = elf::symbol::Elf32_Sym;
-        const REL_MASK: usize = 0xFF;
-        const REL_BIT: usize = 8;
-        const PHDR_SIZE: usize = core::mem::size_of::<elf::segment::Elf32_Phdr>();
-        const EHDR_SIZE: usize = core::mem::size_of::<elf::file::Elf32_Ehdr>();
-    }
-}
-
 #[derive(Debug)]
 pub enum Error {
+    /// Returned when encountered an io error.
     #[cfg(feature = "std")]
     IOError {
         err: std::io::Error,
@@ -156,7 +117,7 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Error::IOError { err } => Some(err),
-			#[cfg(feature = "mmap")]
+            #[cfg(feature = "mmap")]
             Error::MmapError { err } => Some(err),
             _ => None,
         }
@@ -188,7 +149,7 @@ impl From<nix::Error> for Error {
 
 #[cfg(any(feature = "libgcc", feature = "libunwind"))]
 impl From<gimli::Error> for Error {
-	#[cold]
+    #[cold]
     fn from(value: gimli::Error) -> Self {
         Error::GimliError { err: value }
     }
