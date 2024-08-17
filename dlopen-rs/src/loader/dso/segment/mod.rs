@@ -37,13 +37,33 @@ impl ELFRelro {
 
 #[derive(Debug)]
 pub(crate) struct ELFSegments {
-    pub(crate) memory: NonNull<c_void>,
+    memory: NonNull<c_void>,
     /// -addr_min / -addr_min + align_offset
-    pub(crate) offset: isize,
-    pub(crate) len: usize,
+    offset: isize,
+    len: usize,
 }
 
 impl ELFSegments {
+    pub(crate) const fn new(memory: NonNull<c_void>, offset: isize, len: usize) -> ELFSegments {
+        ELFSegments {
+            memory,
+            offset,
+            len,
+        }
+    }
+
+    #[inline]
+	#[allow(unused)]
+    pub(crate) fn offset(&self) -> isize {
+        self.offset
+    }
+
+    #[inline]
+    #[allow(unused)]
+    pub(crate) fn len(&self) -> usize {
+        self.len
+    }
+
     /// base = memory_addr - addr_min
     #[inline]
     pub(crate) fn base(&self) -> usize {

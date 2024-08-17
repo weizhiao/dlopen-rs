@@ -11,3 +11,4 @@ pub(crate) const REL_DTPMOD: u32 = R_AARCH64_TLS_DTPMOD;
 pub(crate) const REL_SYMBOLIC: u32 = R_AARCH64_ABS64;
 pub(crate) const REL_JUMP_SLOT: u32 = R_AARCH64_JUMP_SLOT;
 pub(crate) const REL_TLSDESC: u32 = R_AARCH64_TLSDESC;
+pub(crate) const REL_DTPOFF:u32 = R_AARCH64_TLS_DTPREL;

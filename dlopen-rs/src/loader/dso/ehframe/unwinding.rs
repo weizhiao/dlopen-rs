@@ -48,7 +48,7 @@ impl ELFUnwind {
 
         let unwind_info = UnwindInfo {
             eh_frame_hdr: self.0,
-            pc_range: segments.base()..segments.base() + segments.len,
+            pc_range: segments.base()..segments.base() + segments.len(),
         };
 
         EH_FINDER

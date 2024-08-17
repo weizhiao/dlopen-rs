@@ -33,16 +33,12 @@ impl MapSegment for ELFFile {
                 offset as _,
             )?
         };
-        Ok(ELFSegments {
-            memory,
-            offset: -(addr_min as isize),
-            len: size,
-        })
+        Ok(ELFSegments::new(memory, -(addr_min as isize), size))
     }
 
     fn load_segment(&mut self, segments: &ELFSegments, phdr: &Phdr) -> crate::Result<()> {
         // 映射的起始地址与结束地址都是页对齐的
-        let addr_min = (-segments.offset) as usize;
+        let addr_min = (-segments.offset()) as usize;
         let base = segments.base();
         // addr_min对应memory中的起始
         let this_min = phdr.p_vaddr as usize & MASK;

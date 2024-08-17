@@ -21,11 +21,11 @@ use super::segment::ELFSegments;
 
 impl ELFSegments {
     pub(crate) fn dummy(addr: usize) -> ELFSegments {
-        ELFSegments {
-            memory: unsafe { NonNull::new_unchecked(addr as *mut _) },
-            offset: 0,
-            len: isize::MAX as _,
-        }
+        ELFSegments::new(
+            unsafe { NonNull::new_unchecked(addr as *mut _) },
+            0,
+            isize::MAX as _,
+        )
     }
 }
 

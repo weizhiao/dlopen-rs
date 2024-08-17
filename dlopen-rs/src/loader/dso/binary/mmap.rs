@@ -28,18 +28,12 @@ impl MapSegment for ELFBinary<'_> {
                 mman::MapFlags::MAP_PRIVATE | mman::MapFlags::MAP_ANON,
             )?
         };
-        Ok(ELFSegments {
-            memory,
-            offset: -(addr_min as isize),
-            len: size,
-        })
+        Ok(ELFSegments::new(memory, -(addr_min as isize), size))
     }
 
     fn load_segment(&mut self, segments: &ELFSegments, phdr: &Phdr) -> crate::Result<()> {
         // 映射的起始地址与结束地址都是页对齐的
-        let addr_min = (-segments.offset) as usize;
         let base = segments.base();
-        // addr_min对应memory中的起始
         let this_min = phdr.p_vaddr as usize & MASK;
         let this_max = (phdr.p_vaddr as usize + phdr.p_memsz as usize + PAGE_SIZE - 1) & MASK;
         let this_len = NonZeroUsize::new(this_max - this_min).unwrap();
@@ -47,7 +41,7 @@ impl MapSegment for ELFBinary<'_> {
         let this_addr = NonZeroUsize::new(this_min + base).unwrap();
 
         let this_off = phdr.p_offset as usize;
-        let copy_start = phdr.p_vaddr as usize - addr_min;
+        let copy_start = phdr.p_vaddr as usize;
         let copy_len = phdr.p_filesz as usize;
         let copy_end = copy_start + copy_len;
         let this_mem = &mut segments.as_mut_slice()[copy_start..copy_end];

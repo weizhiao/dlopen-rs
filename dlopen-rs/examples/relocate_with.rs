@@ -29,7 +29,7 @@ fn main() {
 
     let libexample = ELFLibrary::from_file(path)
         .unwrap()
-        .relocate_with(&[], Some(vec![Box::new(libc), Box::new(libgcc)]))
+        .relocate_with(&[], vec![libc, libgcc])
         .unwrap();
 
     let f: dlopen_rs::Symbol<extern "C" fn(i32) -> i32> =

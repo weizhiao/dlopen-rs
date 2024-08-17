@@ -11,3 +11,4 @@ pub(crate) const REL_DTPMOD: u32 = R_X86_64_DTPMOD64;
 pub(crate) const REL_SYMBOLIC: u32 = R_X86_64_32;
 pub(crate) const REL_JUMP_SLOT: u32 = R_X86_64_JUMP_SLOT;
 pub(crate) const REL_TLSDESC: u32 = u32::MAX;
+pub(crate) const REL_DTPOFF: u32 = R_X86_64_DTPOFF64;

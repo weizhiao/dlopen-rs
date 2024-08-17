@@ -32,22 +32,22 @@ pub(crate) struct ELFRelocation {
 #[allow(unused)]
 pub(crate) struct CommonElfData {
     /// .gnu.hash
-    pub(crate) hashtab: ELFHashTable,
+    hashtab: ELFHashTable,
     /// .dynsym
-    pub(crate) symtab: *const ELFSymbol,
+    symtab: *const ELFSymbol,
     /// .dynstr
-    pub(crate) strtab: elf::string_table::StringTable<'static>,
+    strtab: elf::string_table::StringTable<'static>,
     /// .eh_frame
-    pub(crate) unwind: Option<ELFUnwind>,
+    unwind: Option<ELFUnwind>,
     /// semgents
-    pub(crate) segments: ELFSegments,
+    segments: ELFSegments,
     /// .fini
-    pub(crate) fini_fn: Option<extern "C" fn()>,
+    fini_fn: Option<extern "C" fn()>,
     /// .fini_array
-    pub(crate) fini_array_fn: Option<&'static [extern "C" fn()]>,
+    fini_array_fn: Option<&'static [extern "C" fn()]>,
     /// .tbss and .tdata
     #[cfg(feature = "tls")]
-    pub(crate) tls: Option<Box<tls::ELFTLS>>,
+    tls: Option<Box<tls::ELFTLS>>,
 }
 
 impl CommonElfData {
@@ -61,27 +61,58 @@ impl CommonElfData {
         let symbol = unsafe { self.hashtab.find(name, self.symtab, &self.strtab) };
         symbol
     }
+
+    #[inline]
+    pub(crate) fn symtab(&self) -> *const ELFSymbol {
+        self.symtab
+    }
+
+    #[inline]
+    pub(crate) fn strtab(&self) -> &StringTable {
+        &self.strtab
+    }
+
+    #[inline]
+    pub(crate) fn segments(&self) -> &ELFSegments {
+        &self.segments
+    }
+
+    #[inline]
+    pub(crate) fn fini_fn(&self) -> &Option<extern "C" fn()> {
+        &self.fini_fn
+    }
+
+    #[inline]
+    pub(crate) fn fini_array_fn(&self) -> &Option<&'static [extern "C" fn()]> {
+        &self.fini_array_fn
+    }
+
+    #[inline]
+    #[cfg(feature = "tls")]
+    pub(crate) fn tls(&self) -> *const tls::ELFTLS {
+        self.tls.as_ref().map(|val| val.as_ref() as _).unwrap()
+    }
 }
 
 #[derive(Debug)]
 #[allow(unused)]
 pub(crate) struct ELFLibraryInner {
-    pub(crate) common: CommonElfData,
+    common: CommonElfData,
     /// rela.dyn and rela.plt
-    pub(crate) relocation: ELFRelocation,
+    relocation: ELFRelocation,
     /// GNU_RELRO segment
-    pub(crate) relro: Option<ELFRelro>,
+    relro: Option<ELFRelro>,
     /// .init
-    pub(crate) init_fn: Option<extern "C" fn()>,
+    init_fn: Option<extern "C" fn()>,
     /// .init_array
-    pub(crate) init_array_fn: Option<&'static [extern "C" fn()]>,
+    init_array_fn: Option<&'static [extern "C" fn()]>,
     /// needed libs' name
-    pub(crate) needed_libs: Vec<&'static str>,
+    needed_libs: Vec<&'static str>,
 }
 
 #[derive(Debug)]
 pub struct ELFLibrary {
-    pub(crate) inner: ELFLibraryInner,
+    inner: ELFLibraryInner,
 }
 
 impl ELFLibrary {
@@ -129,6 +160,11 @@ impl ELFLibrary {
     }
 
     #[inline]
+    pub(crate) fn common_data(self) -> CommonElfData {
+        self.inner.common
+    }
+
+    #[inline]
     pub(crate) fn relocation(&self) -> &ELFRelocation {
         &self.inner.relocation
     }
@@ -139,23 +175,23 @@ impl ELFLibrary {
 
     #[inline]
     pub(crate) fn symtab(&self) -> *const ELFSymbol {
-        self.inner.common.symtab
+        self.inner.common.symtab()
     }
 
     #[inline]
     pub(crate) fn strtab(&self) -> &StringTable {
-        &self.inner.common.strtab
+        &self.inner.common.strtab()
     }
 
     #[inline]
-    pub(crate) fn segments(&self) -> &ELFSegments {
-        &self.inner.common.segments
+    pub(crate) fn base(&self) -> usize {
+        self.inner.common.segments().base()
     }
 
     #[inline]
     #[cfg(feature = "tls")]
     pub(crate) fn tls(&self) -> *const tls::ELFTLS {
-        self.inner.common.tls.as_ref().unwrap().as_ref() as *const tls::ELFTLS
+        self.inner.common.tls()
     }
 
     #[inline]
@@ -282,14 +318,11 @@ pub(crate) trait MapSegment {
 }
 
 #[cfg(not(feature = "mmap"))]
-fn create_segments_impl(
-    addr_min: usize,
-    size: usize,
-) -> crate::Result<ELFSegments> {
+fn create_segments_impl(addr_min: usize, size: usize) -> crate::Result<ELFSegments> {
     use alloc::alloc::handle_alloc_error;
     use alloc::alloc::Layout;
-    use segment::ALIGN;
     use core::ptr::NonNull;
+    use segment::ALIGN;
     let len = size + PAGE_SIZE;
 
     // 鉴于有些平台无法分配出PAGE_SIZE对齐的内存，因此这里分配大一些的内存手动对齐
@@ -315,9 +348,5 @@ fn create_segments_impl(
     // };
 
     let memory = unsafe { NonNull::new_unchecked(memory as _) };
-    Ok(ELFSegments {
-        memory,
-        offset,
-        len,
-    })
+    Ok(ELFSegments::new(memory, offset, len))
 }

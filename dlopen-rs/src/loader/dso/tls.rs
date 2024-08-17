@@ -17,8 +17,8 @@ use super::segment::ELFSegments;
 
 #[repr(C)]
 pub(crate) struct TLSIndex {
-    pub ti_module: usize,
-    pub ti_offset: usize,
+    ti_module: usize,
+    ti_offset: usize,
 }
 
 #[derive(Debug)]

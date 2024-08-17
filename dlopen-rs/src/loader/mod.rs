@@ -10,6 +10,7 @@ use core::{
 };
 
 use alloc::{boxed::Box, format, sync::Arc, vec::Vec};
+use arch::ELFSymbol;
 
 use crate::{find_symbol_error, Result};
 use dso::CommonElfData;
@@ -35,7 +36,7 @@ impl RelocatedLibrary {
         external_libs: Option<Vec<Box<dyn ExternLibrary>>>,
     ) -> RelocatedLibrary {
         let inner = RelocatedLibraryInner {
-            common: lib.inner.common,
+            common: lib.common_data(),
             internal_libs: internal_libs.into_boxed_slice(),
             external_libs: external_libs.map(|libs| libs.into_boxed_slice()),
         };
@@ -45,14 +46,17 @@ impl RelocatedLibrary {
         }
     }
 
-    pub(crate) fn get_sym(&self, name: &str) -> Option<*const ()> {
-        self.inner.common.get_sym(name).map(|sym| unsafe {
-            self.inner
-                .common
-                .segments
-                .as_mut_ptr()
-                .add(sym.st_value as usize) as *const ()
-        })
+    pub(crate) fn get_sym(&self, name: &str) -> Option<&ELFSymbol> {
+        self.inner.common.get_sym(name)
+    }
+
+    #[cfg(feature = "tls")]
+    pub(crate) fn get_tls(&self) -> *const dso::tls::ELFTLS {
+        self.inner.common.tls()
+    }
+
+    pub(crate) fn base(&self) -> usize {
+        self.inner.common.segments().base()
     }
 
     /// Get a pointer to a function or static variable by symbol name.
@@ -98,7 +102,12 @@ impl RelocatedLibrary {
     pub unsafe fn get<'lib, T>(&'lib self, name: &str) -> Result<Symbol<'lib, T>> {
         self.get_sym(name)
             .map(|sym| Symbol {
-                ptr: sym as _,
+                ptr: self
+                    .inner
+                    .common
+                    .segments()
+                    .as_mut_ptr()
+                    .add(sym.st_value as usize) as _,
                 pd: PhantomData,
             })
             .ok_or(find_symbol_error(format!("can not find symbol:{}", name)))
@@ -107,11 +116,11 @@ impl RelocatedLibrary {
 
 impl Drop for RelocatedLibrary {
     fn drop(&mut self) {
-        if let Some(fini) = self.inner.common.fini_fn {
+        if let Some(fini) = self.inner.common.fini_fn() {
             fini();
         }
-        if let Some(fini_array) = self.inner.common.fini_array_fn {
-            for fini in fini_array {
+        if let Some(fini_array) = self.inner.common.fini_array_fn() {
+            for fini in *fini_array {
                 fini();
             }
         }
