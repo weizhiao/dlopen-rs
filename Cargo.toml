@@ -1,6 +1,102 @@
+[package]
+name = "dlopen-rs"
+version = "0.2.0"
+edition = "2021"
+authors = ["wzhao <1207410841@qq.com>"]
+readme = "README.md"
+repository = "https://github.com/weizhiao/dlopen-rs"
+keywords = ["dlopen", "so", "elf", "ldso"]
+categories = ["no-std", "os", "embedded"]
+license = "Apache-2.0"
+description = "A library for loading elf dynamic libraries from memory and files"
+
 [workspace]
-members = [
-    "dlopen-rs",
-    "example-dylib",
-]
+members = ["example-dylib"]
 resolver = "2"
+
+[dev-dependencies]
+libloading = "0.8.0"
+
+[dependencies.spin]
+version = "0.9.8"
+default-features = false
+features = ["rwlock"]
+optional = true
+
+[dependencies.unwinding]
+version = "0.2.1"
+default-features = false
+features = ["fde-custom", "unwinder"]
+optional = true
+
+[dependencies.gimli]
+version = "0.30"
+default-features = false
+features = ["read-core"]
+optional = true
+
+[dependencies.hashbrown]
+version = '0.14'
+default-features = false
+features = ['ahash', 'inline-more']
+optional = true
+
+[dependencies.nix]
+version = '0.29'
+default-features = false
+features = ['mman']
+optional = true
+
+[dependencies.phf]
+version = '0.11'
+default-features = false
+features = ['macros']
+
+[dependencies.elf]
+version = "0.7.4"
+default-features = false
+
+[dependencies]
+cfg-if = '1.0'
+
+[features]
+default = ["load_self", "mmap", "tls", "libgcc"]
+
+# enable load the dso of the program itself
+load_self = ["std", "dep:nix"]
+# enable std
+std = []
+# enable this on platforms that support mmap
+mmap = ["dep:nix", "std"]
+# enable this when you need to use thread local storage
+tls = ["std", "dep:nix"]
+# enable this can make loading `faster`, but you'll need to use the `nightly` compiler
+nightly = []
+# enable this when you want to use the exception handling mechanism provided by dlopen-rs
+unwinding = ["dep:unwinding", "dep:spin", "dep:hashbrown"]
+# enable this when program uses libgcc to handle exceptions
+libgcc = ["dep:gimli"]
+# enable this when program uses libunwind to handle exceptions
+libunwind = ["dep:gimli"]
+# see https://github.com/nbdd0121/unwinding/#unwinder
+fde-phdr-dl = ["unwinding?/fde-phdr-dl"]
+# see https://github.com/nbdd0121/unwinding/#baremetal
+fde-static = ["unwinding?/fde-static"]
+# see https://github.com/nbdd0121/unwinding/#baremetal
+fde-gnu-eh-frame-hdr = ["unwinding?/fde-gnu-eh-frame-hdr"]
+
+[[example]]
+name = "load_self"
+required-features = ["load_self", "tls", "libgcc"]
+
+[[example]]
+name = "from_binary"
+required-features = ["load_self", "libgcc", "tls"]
+
+[[example]]
+name = "relocate_with"
+required-features = ["mmap", "tls", "libgcc"]
+
+[[example]]
+name = "unwinding"
+required-features = ["mmap", "tls", "unwinding", "load_self", "fde-phdr-dl"]
