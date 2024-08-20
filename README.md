@@ -3,14 +3,14 @@
 [![license](https://img.shields.io/crates/l/dlopen-rs.svg)](https://crates.io/crates/dlopen-rs)
 # dlopen-rs
 
-dlopen-rs supports loading dynamic libraries from memory and files, supports `no_std` environments, and does not rely on the dynamic linker `ldso`
+dlopen-rs supports loading dynamic libraries from memory and files, supports `no_std` environment. It gives you more freedom to load and control dynamic libraries, and provides a possible option for using dynamic libraries in `no_std` environment. It also works well with the system's dynamic linker in `std` environment
 
 Currently supports `x86_64`, `x86`, `RV64` and `AArch64`.
 
 ## Feature
 | Feature              | Default | Description |
 |--------------------- |---------|-|
-| load_self            | Yes     | Enable load the dso of the program itself |
+| ldso            | Yes     | Allows dynamic libraries to be loaded using system dynamic loaders(`ldso`) |
 | std          | Yes     | Enable `std` |
 | mmap         | Yes      | Enable this on platforms that support `mmap` |
 | tls         | Yes     | Enable this when you need to use `thread local storage` |
@@ -26,8 +26,8 @@ use std::path::Path;
 
 fn main() {
     let path = Path::new("./target/release/libexample.so");
-    let libc = ELFLibrary::load_self("libc").unwrap();
-    let libgcc = ELFLibrary::load_self("libgcc").unwrap();
+    let libc = ELFLibrary::ldso_load("libc.so.6").unwrap();
+    let libgcc = ELFLibrary::ldso_load("libgcc_s.so.1").unwrap();
     let libexample = ELFLibrary::from_file(path)
         .unwrap()
         .relocate(&[libgcc, libc])
@@ -48,4 +48,4 @@ fn main() {
 }
 ```
 ## NOTE
-There is currently no support for using backtrace in loaded dynamic library code, and there is no support for debugging loaded dynamic libraries using gdb
+There is currently no support for debugging loaded dynamic libraries using gdb/lldb

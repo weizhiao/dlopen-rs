@@ -4,22 +4,32 @@ mod ehdr;
 mod ehframe;
 #[cfg(feature = "std")]
 pub(crate) mod file;
-mod hashtable;
-#[cfg(feature = "load_self")]
-mod load_self;
+mod hash_table;
 mod segment;
+mod string_table;
 #[cfg(feature = "tls")]
 pub(crate) mod tls;
 
-use super::arch::{ELFSymbol, Phdr, Rela, PHDR_SIZE};
+use alloc::{
+    boxed::Box,
+    ffi::CString,
+    string::{String, ToString},
+};
+use core::{ffi::CStr, ops::Range};
+use string_table::ELFStringTable;
+
+use super::{
+    arch::{ELFSymbol, Phdr, Rela, PHDR_SIZE},
+    ExternLibrary, RelocatedLibrary,
+};
 
 use crate::{parse_dynamic_error, Result};
 use alloc::vec::Vec;
 use binary::ELFBinary;
 use dynamic::ELFDynamic;
-use ehframe::ELFUnwind;
-use elf::{abi::*, string_table::StringTable};
-use hashtable::ELFHashTable;
+use ehframe::EhFrame;
+use elf::abi::*;
+use hash_table::ELFHashTable;
 use segment::{ELFRelro, ELFSegments, MASK, PAGE_SIZE};
 
 #[derive(Debug)]
@@ -30,15 +40,70 @@ pub(crate) struct ELFRelocation {
 
 #[derive(Debug)]
 #[allow(unused)]
+pub(crate) struct InternalLib {
+    common: CommonElfData,
+    #[cfg(feature = "std")]
+    is_register: core::sync::atomic::AtomicBool,
+    internal_libs: Box<[RelocatedLibrary]>,
+    external_libs: Option<Box<[Box<dyn ExternLibrary>]>>,
+}
+
+impl InternalLib {
+    pub(crate) fn new(
+        lib: ELFLibrary,
+        internal_libs: Vec<RelocatedLibrary>,
+        external_libs: Option<Vec<Box<dyn ExternLibrary>>>,
+    ) -> InternalLib {
+        InternalLib {
+            common: lib.into_common_data(),
+            #[cfg(feature = "std")]
+            is_register: core::sync::atomic::AtomicBool::new(false),
+            internal_libs: internal_libs.into_boxed_slice(),
+            external_libs: external_libs.map(|libs| libs.into_boxed_slice()),
+        }
+    }
+
+    #[cfg(feature = "std")]
+    pub(crate) fn is_register(&self) -> bool {
+        self.is_register.load(core::sync::atomic::Ordering::SeqCst)
+    }
+
+    #[cfg(feature = "std")]
+    /// set is_register true
+    pub(crate) fn register(&self) {
+        self.is_register
+            .store(true, core::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub(crate) fn get_sym(&self, name: &str) -> Option<&ELFSymbol> {
+        self.common.get_sym(name)
+    }
+
+    pub(crate) fn common_data(&self) -> &CommonElfData {
+        &self.common
+    }
+
+    pub(crate) fn name(&self) -> &CStr {
+        self.common.name()
+    }
+}
+
+#[derive(Debug)]
+#[allow(unused)]
 pub(crate) struct CommonElfData {
+    /// file name
+    name: CString,
+    /// phdrs
+    #[cfg(feature = "std")]
+    phdrs: Option<&'static [Phdr]>,
     /// .gnu.hash
     hashtab: ELFHashTable,
     /// .dynsym
     symtab: *const ELFSymbol,
     /// .dynstr
-    strtab: elf::string_table::StringTable<'static>,
+    strtab: ELFStringTable<'static>,
     /// .eh_frame
-    unwind: Option<ELFUnwind>,
+    unwind: Option<EhFrame>,
     /// semgents
     segments: ELFSegments,
     /// .fini
@@ -52,14 +117,25 @@ pub(crate) struct CommonElfData {
 
 impl CommonElfData {
     pub(crate) fn get_sym(&self, name: &str) -> Option<&ELFSymbol> {
-        let bytes = name.as_bytes();
-        let name = if *bytes.last().unwrap() == 0 {
-            &bytes[..bytes.len() - 1]
-        } else {
-            bytes
+        let symbol = unsafe {
+            self.hashtab
+                .find(name.as_bytes(), self.symtab, &self.strtab)
         };
-        let symbol = unsafe { self.hashtab.find(name, self.symtab, &self.strtab) };
         symbol
+    }
+
+    #[cfg(feature = "std")]
+    pub(crate) fn phdrs(&self) -> Option<&[Phdr]> {
+        self.phdrs
+    }
+
+    pub(crate) fn name(&self) -> &CStr {
+        &self.name
+    }
+
+    #[inline]
+    pub(crate) fn base(&self) -> usize {
+        self.segments.base()
     }
 
     #[inline]
@@ -68,13 +144,8 @@ impl CommonElfData {
     }
 
     #[inline]
-    pub(crate) fn strtab(&self) -> &StringTable {
+    pub(crate) fn strtab(&self) -> &ELFStringTable {
         &self.strtab
-    }
-
-    #[inline]
-    pub(crate) fn segments(&self) -> &ELFSegments {
-        &self.segments
     }
 
     #[inline]
@@ -89,8 +160,8 @@ impl CommonElfData {
 
     #[inline]
     #[cfg(feature = "tls")]
-    pub(crate) fn tls(&self) -> *const tls::ELFTLS {
-        self.tls.as_ref().map(|val| val.as_ref() as _).unwrap()
+    pub(crate) fn tls(&self) -> Option<*const tls::ELFTLS> {
+        self.tls.as_ref().map(|val| val.as_ref() as _)
     }
 }
 
@@ -134,8 +205,9 @@ impl ELFLibrary {
     ///
     #[cfg(feature = "std")]
     pub fn from_file<P: AsRef<std::ffi::OsStr>>(path: P) -> Result<ELFLibrary> {
+        let file_name = path.as_ref().to_str().unwrap().to_string();
         let mut file = super::dso::file::ELFFile::new(path)?;
-        let inner = file.load()?;
+        let inner = file.load(file_name)?;
         Ok(ELFLibrary { inner })
     }
 
@@ -148,9 +220,9 @@ impl ELFLibrary {
     /// let bytes = std::fs::read(path).unwrap();
     /// let lib = ELFLibrary::from_binary(&bytes).unwarp();
     /// ```
-    pub fn from_binary(bytes: &[u8]) -> Result<ELFLibrary> {
+    pub fn from_binary(bytes: &[u8], name: impl ToString) -> Result<ELFLibrary> {
         let mut file = ELFBinary::new(bytes);
-        let inner = file.load()?;
+        let inner = file.load(name.to_string())?;
         Ok(ELFLibrary { inner })
     }
 
@@ -160,7 +232,12 @@ impl ELFLibrary {
     }
 
     #[inline]
-    pub(crate) fn common_data(self) -> CommonElfData {
+    pub(crate) fn common_data(&self) -> &CommonElfData {
+        &self.inner.common
+    }
+
+    #[inline]
+    pub(crate) fn into_common_data(self) -> CommonElfData {
         self.inner.common
     }
 
@@ -179,19 +256,8 @@ impl ELFLibrary {
     }
 
     #[inline]
-    pub(crate) fn strtab(&self) -> &StringTable {
+    pub(crate) fn strtab(&self) -> &ELFStringTable {
         &self.inner.common.strtab()
-    }
-
-    #[inline]
-    pub(crate) fn base(&self) -> usize {
-        self.inner.common.segments().base()
-    }
-
-    #[inline]
-    #[cfg(feature = "tls")]
-    pub(crate) fn tls(&self) -> *const tls::ELFTLS {
-        self.inner.common.tls()
     }
 
     #[inline]
@@ -208,9 +274,9 @@ impl ELFLibrary {
 /// a dynamic shared object
 pub(crate) trait SharedObject: MapSegment {
     /// validate ehdr and get phdrs
-    fn parse_ehdr(&mut self) -> crate::Result<Vec<u8>>;
-    fn load(&mut self) -> Result<ELFLibraryInner> {
-        let phdrs = self.parse_ehdr()?;
+    fn parse_ehdr(&mut self) -> crate::Result<(Range<usize>, Vec<u8>)>;
+    fn load(&mut self, name: String) -> Result<ELFLibraryInner> {
+        let (phdr_range, phdrs) = self.parse_ehdr()?;
         debug_assert_eq!(phdrs.len() % PHDR_SIZE, 0);
         let phdrs = unsafe {
             core::slice::from_raw_parts(phdrs.as_ptr().cast::<Phdr>(), phdrs.len() / PHDR_SIZE)
@@ -249,18 +315,46 @@ pub(crate) trait SharedObject: MapSegment {
         let mut relro = None;
         #[cfg(feature = "tls")]
         let mut tls = None;
+        let mut loaded_phdrs: Option<&[Phdr]> = None;
 
         for phdr in phdrs {
             match phdr.p_type {
                 PT_LOAD => self.load_segment(&segments, phdr)?,
                 PT_DYNAMIC => dynamics = Some(ELFDynamic::new(phdr, &segments)?),
-                PT_GNU_EH_FRAME => unwind = Some(ELFUnwind::new(phdr, &segments)?),
+                PT_GNU_EH_FRAME => unwind = Some(EhFrame::new(phdr, &segments)?),
                 PT_GNU_RELRO => relro = Some(ELFRelro::new(phdr, &segments)),
                 #[cfg(feature = "tls")]
                 PT_TLS => tls = Some(Box::new(unsafe { tls::ELFTLS::new(phdr, &segments)? })),
+                PT_PHDR => {
+                    loaded_phdrs = Some(unsafe {
+                        core::slice::from_raw_parts(
+                            segments.as_mut_ptr().add(phdr.p_vaddr as _).cast(),
+                            phdr.p_memsz as usize / size_of::<Phdr>(),
+                        )
+                    })
+                }
                 _ => {}
             }
         }
+
+        loaded_phdrs.or_else(|| {
+            for phdr in phdrs {
+                let cur_range = phdr.p_offset as usize..(phdr.p_offset + phdr.p_filesz) as usize;
+                if cur_range.contains(&phdr_range.start) && cur_range.contains(&phdr_range.end) {
+                    debug_assert_eq!((cur_range.end - cur_range.start) % size_of::<Phdr>(), 0);
+                    return Some(unsafe {
+                        core::slice::from_raw_parts(
+                            segments
+                                .as_mut_ptr()
+                                .add(phdr_range.start - cur_range.start)
+                                .cast(),
+                            (cur_range.end - cur_range.start) / size_of::<Phdr>(),
+                        )
+                    });
+                }
+            }
+            None
+        });
 
         if let Some(unwind_info) = unwind.as_ref() {
             unwind_info.register_unwind(&segments);
@@ -268,12 +362,12 @@ pub(crate) trait SharedObject: MapSegment {
 
         let dynamics = dynamics.ok_or(parse_dynamic_error("elf file does not have dynamic"))?;
 
-        let strtab = elf::string_table::StringTable::new(dynamics.strtab());
+        let strtab = ELFStringTable::new(dynamics.strtab());
 
         let needed_libs: Vec<&'static str> = dynamics
             .needed_libs()
             .iter()
-            .map(|needed_lib| strtab.get(*needed_lib).unwrap())
+            .map(|needed_lib| strtab.get_str(*needed_lib).unwrap())
             .collect();
 
         let relocation = ELFRelocation {
@@ -286,6 +380,9 @@ pub(crate) trait SharedObject: MapSegment {
 
         let elf_lib = ELFLibraryInner {
             common: CommonElfData {
+                name: CString::new(name).unwrap(),
+                #[cfg(feature = "std")]
+                phdrs: loaded_phdrs,
                 hashtab,
                 symtab,
                 strtab,

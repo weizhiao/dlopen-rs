@@ -1,3 +1,5 @@
+use core::ops::Range;
+
 use alloc::vec::Vec;
 
 use super::{ehdr::ELFEhdr, SharedObject};
@@ -18,12 +20,12 @@ impl ELFBinary<'_> {
 }
 
 impl SharedObject for ELFBinary<'_> {
-    fn parse_ehdr(&mut self) -> crate::Result<Vec<u8>> {
+    fn parse_ehdr(&mut self) -> crate::Result<(Range<usize>, Vec<u8>)> {
         let ehdr = ELFEhdr::new(self.bytes)?;
         ehdr.validate()?;
 
         let (phdr_start, phdr_end) = ehdr.phdr_range();
         let phdrs = &self.bytes[phdr_start..phdr_end];
-        Ok(phdrs.to_vec())
+        Ok((phdr_start..phdr_end, phdrs.to_vec()))
     }
 }

@@ -6,10 +6,10 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub(crate) struct ELFUnwind(usize);
+pub(crate) struct EhFrame(usize);
 
-impl ELFUnwind {
-    pub(crate) fn new(phdr: &Phdr, segments: &ELFSegments) -> Result<ELFUnwind> {
+impl EhFrame {
+    pub(crate) fn new(phdr: &Phdr, segments: &ELFSegments) -> Result<EhFrame> {
         let base = segments.base();
         let eh_frame_hdr_off = phdr.p_vaddr as usize;
         let eh_frame_hdr_size = phdr.p_memsz as usize;
@@ -24,11 +24,11 @@ impl ELFUnwind {
             gimli::Pointer::Direct(x) => x as usize,
             gimli::Pointer::Indirect(x) => unsafe { *(x as *const _) },
         };
-        Ok(ELFUnwind(eh_frame_addr))
+        Ok(EhFrame(eh_frame_addr))
     }
 }
 
-impl Drop for ELFUnwind {
+impl Drop for EhFrame {
     fn drop(&mut self) {
         extern "C" {
             fn __deregister_frame(begin: *const c_void);
@@ -37,7 +37,7 @@ impl Drop for ELFUnwind {
     }
 }
 
-impl ELFUnwind {
+impl EhFrame {
     #[inline]
     pub(crate) fn register_unwind(&self, _segments: &ELFSegments) {
         extern "C" {

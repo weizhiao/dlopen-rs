@@ -7,6 +7,7 @@
 use std::{
     backtrace::Backtrace,
     cell::Cell,
+    ffi::CStr,
     os::raw::{c_char, c_int},
     thread,
 };
@@ -55,6 +56,8 @@ pub fn rust_fun_add_one(arg: i32) -> i32 {
 #[no_mangle]
 pub extern "C" fn c_fun_print_something_else() {
     println!("something else");
+    let cstr = unsafe { CStr::from_ptr(c"rust1223".as_ptr()) };
+    println!("{}", cstr.to_bytes().len());
 }
 
 #[no_mangle]

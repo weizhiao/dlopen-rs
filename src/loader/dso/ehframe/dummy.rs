@@ -4,15 +4,15 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub(crate) struct ELFUnwind;
+pub(crate) struct EhFrame;
 
-impl ELFUnwind {
-    pub(crate) fn new(_phdr: &Phdr, _segments: &ELFSegments) -> Result<ELFUnwind> {
-        Ok(ELFUnwind)
+impl EhFrame {
+    pub(crate) fn new(_phdr: &Phdr, _segments: &ELFSegments) -> Result<EhFrame> {
+        Ok(EhFrame)
     }
 }
 
-impl ELFUnwind {
+impl EhFrame {
     #[inline]
     pub(crate) fn register_unwind(&self, _segments: &ELFSegments) {}
 }

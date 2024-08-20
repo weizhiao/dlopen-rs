@@ -9,8 +9,8 @@
 //! use dlopen_rs::ELFLibrary;
 //! use std::path::Path;
 //! let path = Path::new("./target/release/libexample.so");
-//! let libc = ELFLibrary::load_self("libc").unwrap();
-//! let libgcc = ELFLibrary::load_self("libgcc").unwrap();
+//!	let libc = ELFLibrary::ldso_load("libc.so.6").unwrap();
+//!	let libgcc = ELFLibrary::ldso_load("libgcc_s.so.1").unwrap();
 //! let libexample = ELFLibrary::from_file(path)
 //!		.unwrap()
 //!		.relocate(&[libgcc, libc])
@@ -36,6 +36,8 @@
 extern crate alloc;
 
 pub(crate) mod loader;
+#[cfg(feature = "std")]
+mod register;
 
 use alloc::string::{String, ToString};
 pub use loader::{ELFLibrary, ExternLibrary, RelocatedLibrary, Symbol};
@@ -69,7 +71,7 @@ pub enum Error {
     GimliError {
         err: gimli::Error,
     },
-    #[cfg(feature = "load_self")]
+    #[cfg(feature = "ldso")]
     FindLibError {
         msg: String,
     },
@@ -100,7 +102,7 @@ impl Display for Error {
             Error::MmapError { err } => write!(f, "{err}"),
             #[cfg(any(feature = "libgcc", feature = "libunwind"))]
             Error::GimliError { err } => write!(f, "{err}"),
-            #[cfg(feature = "load_self")]
+            #[cfg(feature = "ldso")]
             Error::FindLibError { msg } => write!(f, "{msg}"),
             #[cfg(feature = "tls")]
             Error::TLSError { msg } => write!(f, "{msg}"),
@@ -162,7 +164,7 @@ fn tls_error(msg: &'static str) -> Error {
     Error::TLSError { msg }
 }
 
-#[cfg(feature = "load_self")]
+#[cfg(feature = "ldso")]
 #[cold]
 #[inline(never)]
 fn find_lib_error(msg: impl ToString) -> Error {

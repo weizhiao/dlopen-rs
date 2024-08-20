@@ -1,4 +1,5 @@
 use super::{arch::*, builtin::BUILTIN, dso::ELFLibrary, ExternLibrary};
+use crate::loader::dso::CommonElfData;
 use crate::relocate_error;
 use crate::RelocatedLibrary;
 use crate::Result;
@@ -54,18 +55,20 @@ impl ELFLibrary {
             .iter()
             .chain(self.relocation().rel.unwrap_or(&[]));
 
-        struct SymDef<'temp> {
-            /// symbol name
-            name: &'temp str,
-            /// None->fail/external lib's sym  Some(..)->self/internal lib
-            sym: Option<&'temp ELFSymbol>,
-            /// None->self/external lib  Some(..)->internal lib
-            dso: Option<&'temp RelocatedLibrary>,
+        struct InternalSym<'temp> {
+            sym: &'temp ELFSymbol,
+            dso: &'temp CommonElfData,
         }
 
-        let write_val = |addr: u64, symbol: usize| {
+		#[allow(unused)]
+        enum SymDef<'temp> {
+            Internal(InternalSym<'temp>),
+            External(*const ()),
+        }
+
+        let write_val = |addr: usize, symbol: usize| {
             unsafe {
-                let rel_addr = (self.base() + addr as usize) as *mut usize;
+                let rel_addr = (self.common_data().base() + addr) as *mut usize;
                 rel_addr.write(symbol)
             };
         };
@@ -73,52 +76,60 @@ impl ELFLibrary {
         for rela in iter {
             let r_type = rela.r_info as usize & REL_MASK;
             let r_sym = rela.r_info as usize >> REL_BIT;
+            let mut str_name = None;
             let symdef = if r_sym != 0 {
                 let dynsym = unsafe { &*self.symtab().add(r_sym) };
-                let name = self
+                let temp_cstr_name = self
                     .strtab()
-                    .get(dynsym.st_name as usize)
+                    .get_cstr(dynsym.st_name as usize)
                     .map_err(relocate_error)?;
-
-                let symdef = if dynsym.st_shndx != SHN_UNDEF {
-                    SymDef {
-                        name,
-                        sym: Some(dynsym),
-                        dso: None,
-                    }
+				let temp_str_name = temp_cstr_name.to_str().unwrap();
+                str_name = Some(temp_str_name);
+                if dynsym.st_shndx != SHN_UNDEF {
+                    Some(SymDef::Internal(InternalSym {
+                        sym: dynsym,
+                        dso: self.common_data(),
+                    }))
                 } else {
-                    let mut symbol = SymDef {
-                        name,
-                        sym: None,
-                        dso: None,
-                    };
+                    let mut symbol = None;
                     for lib in internal_libs.iter() {
-                        if let Some(sym) = lib.get_sym(name) {
-                            symbol.sym = Some(sym);
-                            symbol.dso = Some(lib);
-                            break;
+                        match lib.inner.as_ref() {
+                            crate::loader::RelocatedLibraryInner::Internal(lib) => {
+                                if let Some(sym) = lib.get_sym(temp_str_name) {
+                                    symbol = Some(SymDef::Internal(InternalSym {
+                                        sym,
+                                        dso: lib.common_data(),
+                                    }));
+                                    break;
+                                }
+                            }
+							#[cfg(feature = "ldso")]
+                            crate::loader::RelocatedLibraryInner::External(lib) => {
+                                if let Some(sym) = lib.get_sym(temp_cstr_name) {
+                                    symbol = Some(SymDef::External(sym));
+                                    break;
+                                }
+                            }
                         }
                     }
                     symbol
-                };
-                Some(symdef)
+                }
             } else {
                 None
             };
 
             // search order: BUILTIN -> internal_libs -> external_libs
             let find_symbol = || -> Result<*const ()> {
-                let symdef = symdef.as_ref().unwrap();
-                let name = symdef.name;
+                let name = str_name.unwrap();
                 BUILTIN
                     .get(name)
                     .copied()
                     .or_else(|| {
-                        symdef.sym.map(|sym| {
-                            symdef
-                                .dso
-                                .map(|dso| (dso.base() + sym.st_value as usize) as _)
-                                .unwrap_or((self.base() + sym.st_value as usize) as _)
+                        symdef.as_ref().map(|symdef| match symdef {
+                            SymDef::Internal(sym) => {
+                                (sym.dso.base() + sym.sym.st_value as usize) as _
+                            }
+                            SymDef::External(sym) => *sym,
                         })
                     })
                     .or_else(|| {
@@ -146,63 +157,60 @@ impl ELFLibrary {
                 // REL_GOT/REL_JUMP_SLOT: S  REL_SYMBOLIC: S + A
                 REL_JUMP_SLOT | REL_GOT | REL_SYMBOLIC => {
                     let symbol = find_symbol()?;
-                    write_val(rela.r_offset, symbol as usize + rela.r_addend as usize);
+                    write_val(
+                        rela.r_offset as usize,
+                        symbol as usize + rela.r_addend as usize,
+                    );
                 }
                 // B + A
                 REL_RELATIVE => {
-                    write_val(rela.r_offset, self.base() + rela.r_addend as usize);
+                    write_val(
+                        rela.r_offset as usize,
+                        self.common_data().base() + rela.r_addend as usize,
+                    );
                 }
                 // ELFTLS
                 #[cfg(feature = "tls")]
                 REL_DTPMOD => {
-                    if let Some(ref symdef) = symdef {
-                        if symdef.sym.is_none() {
-                            return Err(relocate_error(format!(
-                                "can not relocate symbol {}",
-                                symdef.name
-                            )));
+                    if r_sym != 0 {
+                        let symdef = symdef.ok_or(relocate_error(format!(
+                            "can not relocate symbol {}",
+                            str_name.unwrap()
+                        )))?;
+                        match symdef {
+                            SymDef::Internal(def) => {
+                                write_val(rela.r_offset as usize, def.dso.tls().unwrap() as usize)
+                            }
+                            SymDef::External(_) => {
+                                return Err(relocate_error(format!(
+                                    "can not relocate symbol {}",
+                                    str_name.unwrap()
+                                )));
+                            }
                         }
+                    } else {
+                        write_val(
+                            rela.r_offset as usize,
+                            self.common_data().tls().unwrap() as usize,
+                        );
                     }
-                    // write the dependent dso's tls
-                    write_val(
-                        rela.r_offset,
-                        symdef
-                            .map(|symdef| {
-                                symdef.dso.map(|dso| dso.get_tls()).unwrap_or(self.tls()) as usize
-                            })
-                            .unwrap_or(self.tls() as usize),
-                    );
                 }
                 #[cfg(feature = "tls")]
                 REL_DTPOFF => {
-                    let symdef = symdef.unwrap();
-                    let symbol = symdef.sym.ok_or(relocate_error(format!(
-                        "can not relocate symbol {}",
-                        symdef.name
-                    )))?;
-                    write_val(
-                        rela.r_offset,
-                        (symbol.st_value as usize + rela.r_addend as usize)
-                            .wrapping_sub(TLS_DTV_OFFSET),
-                    );
-                }
-                #[cfg(feature = "tls")]
-                REL_TLSDESC => {
-                    todo!()
-                    // use crate::arch::TLSIndex;
-                    // let tls_index = Box::new(TLSIndex {
-                    //     ti_module: self.tls() as usize,
-                    //     ti_offset: rela.r_addend as usize,
-                    // });
-                    // let rel_addr = unsafe {
-                    //     self.segments().as_mut_ptr().add(rela.r_offset as usize) as *mut usize
-                    // };
-                    // unsafe {
-                    //     rel_addr.write(crate::tls::tls_get_addr as usize);
-                    //     rel_addr
-                    //         .add(1)
-                    //         .write(Box::leak(tls_index) as *const TLSIndex as usize)
-                    // };
+                    let symdef = if let SymDef::Internal(def) = symdef.ok_or(relocate_error(
+                        format!("can not relocate symbol {}", str_name.unwrap()),
+                    ))? {
+                        def
+                    } else {
+                        return Err(relocate_error(format!(
+                            "can not relocate symbol {}",
+                            str_name.unwrap()
+                        )));
+                    };
+                    // offset in tls
+                    let tls_val = (symdef.sym.st_value as usize + rela.r_addend as usize)
+                        .wrapping_sub(TLS_DTV_OFFSET);
+                    write_val(rela.r_offset as usize, tls_val);
                 }
                 _ => {
                     // REL_TPOFF：这种类型的重定位明显做不到，它是为静态模型设计的，这种方式

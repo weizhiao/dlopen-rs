@@ -1,27 +1,29 @@
 mod arch;
 mod builtin;
 pub mod dso;
+#[cfg(feature = "ldso")]
+mod ldso;
 mod relocation;
 
 use core::{
+    ffi::CStr,
     fmt::Debug,
     marker::{self, PhantomData},
     ops,
 };
 
 use alloc::{boxed::Box, format, sync::Arc, vec::Vec};
-use arch::ELFSymbol;
 
 use crate::{find_symbol_error, Result};
-use dso::CommonElfData;
 pub use dso::ELFLibrary;
+use dso::InternalLib;
 
 #[derive(Debug)]
 #[allow(unused)]
-pub(crate) struct RelocatedLibraryInner {
-    pub(crate) common: CommonElfData,
-    pub(crate) internal_libs: Box<[RelocatedLibrary]>,
-    pub(crate) external_libs: Option<Box<[Box<dyn ExternLibrary>]>>,
+pub(crate) enum RelocatedLibraryInner {
+    Internal(InternalLib),
+    #[cfg(feature = "ldso")]
+    External(ldso::ExternalLib),
 }
 
 #[derive(Debug, Clone)]
@@ -29,34 +31,39 @@ pub struct RelocatedLibrary {
     pub(crate) inner: Arc<RelocatedLibraryInner>,
 }
 
+unsafe impl Send for RelocatedLibrary {}
+unsafe impl Sync for RelocatedLibrary {}
+
 impl RelocatedLibrary {
     pub(crate) fn new(
         lib: ELFLibrary,
         internal_libs: Vec<RelocatedLibrary>,
         external_libs: Option<Vec<Box<dyn ExternLibrary>>>,
     ) -> RelocatedLibrary {
-        let inner = RelocatedLibraryInner {
-            common: lib.common_data(),
-            internal_libs: internal_libs.into_boxed_slice(),
-            external_libs: external_libs.map(|libs| libs.into_boxed_slice()),
-        };
+        let inner =
+            RelocatedLibraryInner::Internal(InternalLib::new(lib, internal_libs, external_libs));
 
         RelocatedLibrary {
             inner: Arc::new(inner),
         }
     }
 
-    pub(crate) fn get_sym(&self, name: &str) -> Option<&ELFSymbol> {
-        self.inner.common.get_sym(name)
+    /// get the dynamic library name
+    pub fn name(&self) -> &CStr {
+        match self.inner.as_ref() {
+            RelocatedLibraryInner::Internal(lib) => lib.name(),
+            #[cfg(feature = "ldso")]
+            RelocatedLibraryInner::External(lib) => lib.name(),
+        }
     }
 
-    #[cfg(feature = "tls")]
-    pub(crate) fn get_tls(&self) -> *const dso::tls::ELFTLS {
-        self.inner.common.tls()
-    }
-
-    pub(crate) fn base(&self) -> usize {
-        self.inner.common.segments().base()
+    #[cfg(feature = "std")]
+    pub(crate) fn into_internal_lib(&self) -> Option<&InternalLib> {
+        match self.inner.as_ref() {
+            RelocatedLibraryInner::Internal(lib) => Some(lib),
+            #[cfg(feature = "ldso")]
+            RelocatedLibraryInner::External(_) => None,
+        }
     }
 
     /// Get a pointer to a function or static variable by symbol name.
@@ -100,33 +107,39 @@ impl RelocatedLibrary {
     /// };
     /// ```
     pub unsafe fn get<'lib, T>(&'lib self, name: &str) -> Result<Symbol<'lib, T>> {
-        self.get_sym(name)
-            .map(|sym| Symbol {
-                ptr: self
-                    .inner
-                    .common
-                    .segments()
-                    .as_mut_ptr()
-                    .add(sym.st_value as usize) as _,
+        match self.inner.as_ref() {
+            RelocatedLibraryInner::Internal(lib) => lib.get_sym(name).map(|sym| Symbol {
+                ptr: (lib.common_data().base() + sym.st_value as usize) as _,
                 pd: PhantomData,
-            })
-            .ok_or(find_symbol_error(format!("can not find symbol:{}", name)))
+            }),
+            #[cfg(feature = "ldso")]
+            RelocatedLibraryInner::External(lib) => {
+                let name = alloc::ffi::CString::new(name).unwrap();
+                lib.get_sym(&name).map(|sym| Symbol {
+                    ptr: sym as _,
+                    pd: PhantomData,
+                })
+            }
+        }
+        .ok_or(find_symbol_error(format!("can not find symbol:{}", name)))
     }
 }
 
 impl Drop for RelocatedLibrary {
     fn drop(&mut self) {
-        if let Some(fini) = self.inner.common.fini_fn() {
-            fini();
-        }
-        if let Some(fini_array) = self.inner.common.fini_array_fn() {
-            for fini in *fini_array {
+        #[allow(irrefutable_let_patterns)]
+        if let RelocatedLibraryInner::Internal(lib) = self.inner.as_ref() {
+            if let Some(fini) = lib.common_data().fini_fn() {
                 fini();
+            }
+            if let Some(fini_array) = lib.common_data().fini_array_fn() {
+                for fini in *fini_array {
+                    fini();
+                }
             }
         }
     }
 }
-
 pub trait ExternLibrary: Debug {
     /// Get the symbol of the dynamic library, and the return value is the address of the symbol
     /// # Examples

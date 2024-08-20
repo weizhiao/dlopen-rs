@@ -5,10 +5,10 @@ fn main() {
 
     let bytes = std::fs::read(path).unwrap();
 
-    let libc = ELFLibrary::load_self("libc").unwrap();
-    let libgcc = ELFLibrary::load_self("libgcc").unwrap();
+    let libc = ELFLibrary::sys_load("libc.so.6").unwrap();
+    let libgcc = ELFLibrary::sys_load("libgcc_s.so.1").unwrap();
 
-    let libexample = ELFLibrary::from_binary(&bytes)
+    let libexample = ELFLibrary::from_binary(&bytes, "libexample.so")
         .unwrap()
         .relocate(&[libgcc, libc])
         .unwrap();

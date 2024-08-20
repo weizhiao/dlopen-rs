@@ -1,4 +1,4 @@
-use core::mem::MaybeUninit;
+use core::{mem::MaybeUninit, ops::Range};
 use std::{
     fs::File,
     io::{Read, Seek, SeekFrom},
@@ -29,7 +29,7 @@ impl ELFFile {
 }
 
 impl SharedObject for ELFFile {
-    fn parse_ehdr(&mut self) -> Result<Vec<u8>> {
+    fn parse_ehdr(&mut self) -> Result<(Range<usize>, Vec<u8>)> {
         let mut buf: MaybeUninit<[u8; BUF_SIZE]> = MaybeUninit::uninit();
         self.file.read_exact(unsafe { &mut *buf.as_mut_ptr() })?;
         let buf = unsafe { buf.assume_init() };
@@ -47,6 +47,6 @@ impl SharedObject for ELFFile {
         } else {
             phdrs.extend_from_slice(&buf[phdr_start..phdr_end]);
         };
-        Ok(phdrs)
+        Ok((phdr_start..phdr_end, phdrs))
     }
 }

@@ -12,22 +12,22 @@ use unwinding::custom_eh_frame_finder::{
 };
 
 #[derive(Debug)]
-pub(crate) struct ELFUnwind(usize);
+pub(crate) struct EhFrame(usize);
 
-impl ELFUnwind {
-    pub(crate) fn new(phdr: &Phdr, segments: &ELFSegments) -> Result<ELFUnwind> {
+impl EhFrame {
+    pub(crate) fn new(phdr: &Phdr, segments: &ELFSegments) -> Result<EhFrame> {
         let eh_frame_hdr = segments.base() + phdr.p_vaddr as usize;
-        Ok(ELFUnwind(eh_frame_hdr))
+        Ok(EhFrame(eh_frame_hdr))
     }
 }
 
-impl Drop for ELFUnwind {
+impl Drop for EhFrame {
     fn drop(&mut self) {
         let mut eh_finder = EH_FINDER.unwind_infos.write();
         if let Entry::Occupied(entry) = eh_finder.entry(
             self.0 as u64,
             |val| val.eh_frame_hdr == self.0,
-            ELFUnwind::hasher,
+            EhFrame::hasher,
         ) {
             let _ = entry.remove();
         } else {
@@ -39,7 +39,7 @@ impl Drop for ELFUnwind {
 static IS_SET: AtomicBool = AtomicBool::new(false);
 static EH_FINDER: EhFinder = EhFinder::new();
 
-impl ELFUnwind {
+impl EhFrame {
     #[inline]
     pub(crate) fn register_unwind(&self, segments: &ELFSegments) {
         if !IS_SET.swap(true, core::sync::atomic::Ordering::SeqCst) {
@@ -54,7 +54,7 @@ impl ELFUnwind {
         EH_FINDER
             .unwind_infos
             .write()
-            .insert_unique(self.0 as u64, unwind_info, ELFUnwind::hasher);
+            .insert_unique(self.0 as u64, unwind_info, EhFrame::hasher);
     }
 
     //每个unwind_info的eh_frame_hdr都是不同的

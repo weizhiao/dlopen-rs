@@ -21,4 +21,4 @@ cfg_if::cfg_if! {
     }
 }
 
-pub(crate) use imp::ELFUnwind;
+pub(crate) use imp::EhFrame;

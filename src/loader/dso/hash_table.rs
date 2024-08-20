@@ -1,5 +1,6 @@
 use crate::{loader::arch::ELFSymbol, unlikely};
-use elf::string_table::StringTable;
+
+use super::string_table::ELFStringTable;
 
 #[derive(Debug)]
 pub(crate) enum ELFHashTable {
@@ -11,7 +12,7 @@ impl ELFHashTable {
         &self,
         name: &[u8],
         symtab: *const ELFSymbol,
-        strtab: &StringTable<'static>,
+        strtab: &ELFStringTable<'static>,
     ) -> Option<&ELFSymbol> {
         match self {
             ELFHashTable::Gnu(hash_table) => hash_table.find(name, symtab, strtab),
@@ -96,7 +97,7 @@ impl ELFGnuHash {
         &self,
         name: &[u8],
         symtab: *const ELFSymbol,
-        strtab: &StringTable<'static>,
+        strtab: &ELFStringTable<'static>,
     ) -> Option<&ELFSymbol> {
         let hash = ELFGnuHash::gnu_hash(name);
         let table_start_idx = self.table_start_idx as usize;
@@ -114,8 +115,8 @@ impl ELFGnuHash {
             let chain_hash = cur_chain.read();
             if hash | 1 == chain_hash | 1 {
                 let cur_symbol = &*cur_symbol_ptr;
-                let sym_name = strtab.get_raw(cur_symbol.st_name as usize).unwrap();
-                if sym_name == name {
+                let sym_name = strtab.get_str(cur_symbol.st_name as usize).unwrap();
+                if sym_name.as_bytes() == name {
                     return Some(cur_symbol);
                 }
             }

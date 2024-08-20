@@ -14,7 +14,7 @@ pub(crate) const PAGE_SIZE: usize = 0x10000;
 #[cfg(not(target_arch = "aarch64"))]
 pub(crate) const PAGE_SIZE: usize = 0x1000;
 
-pub(crate) const MASK: usize = (0 - PAGE_SIZE as isize) as usize;
+pub(crate) const MASK: usize = !(PAGE_SIZE - 1);
 
 #[cfg(not(feature = "mmap"))]
 pub(crate) const ALIGN: usize = 8;
@@ -53,7 +53,7 @@ impl ELFSegments {
     }
 
     #[inline]
-	#[allow(unused)]
+    #[allow(unused)]
     pub(crate) fn offset(&self) -> isize {
         self.offset
     }

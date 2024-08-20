@@ -2,6 +2,11 @@ use core::ffi::c_int;
 
 #[cfg(feature = "tls")]
 use super::dso::tls::tls_get_addr;
+#[cfg(feature = "std")]
+use crate::register::dl_iterate_phdr_impl;
+
+#[cfg(not(feature = "std"))]
+fn dl_iterate_phdr_impl() {}
 
 #[cfg(not(feature = "tls"))]
 fn tls_get_addr() {}
@@ -9,20 +14,6 @@ fn tls_get_addr() {}
 extern "C" fn __cxa_thread_atexit_impl() -> c_int {
     0
 }
-
-// #[cfg(feature = "std")]
-// extern "C" fn dl_iterate_phdr(
-//     callback: Option<
-//         unsafe extern "C" fn(
-//             info: *mut nix::libc::dl_phdr_info,
-//             size: nix::libc::size_t,
-//             data: nix::libc::c_void,
-//         ) -> nix::libc::c_int,
-//     >,
-//     data: *mut nix::libc::c_void,
-// ) -> nix::libc::c_int {
-//     0
-// }
 
 #[cfg(not(feature = "unwinding"))]
 pub(crate) const BUILTIN: phf::Map<&'static str, *const ()> = phf::phf_map!(
@@ -32,6 +23,7 @@ pub(crate) const BUILTIN: phf::Map<&'static str, *const ()> = phf::phf_map!(
     "_ITM_registerTMCloneTable"=> 0 as _,
     "_ITM_deregisterTMCloneTable"=> 0 as _,
     "__gmon_start__"=> 0 as _,
+    "dl_iterate_phdr"=> dl_iterate_phdr_impl as _,
 );
 
 #[cfg(feature = "unwinding")]
@@ -42,6 +34,7 @@ pub(crate) const BUILTIN: phf::Map<&'static str, *const ()> = phf::phf_map!(
     "_ITM_registerTMCloneTable"=> 0 as _,
     "_ITM_deregisterTMCloneTable"=> 0 as _,
     "__gmon_start__"=> 0 as _,
+	"dl_iterate_phdr"=> dl_iterate_phdr_impl as _,
     "_Unwind_Backtrace" => unwinding::abi::_Unwind_Backtrace as _,
     "_Unwind_ForcedUnwind" => unwinding::abi::_Unwind_ForcedUnwind as _,
     "_Unwind_GetLanguageSpecificData" => unwinding::abi::_Unwind_GetLanguageSpecificData as _,
