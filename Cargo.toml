@@ -1,6 +1,6 @@
 [package]
 name = "dlopen-rs"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 authors = ["wzhao <1207410841@qq.com>"]
 readme = "README.md"
@@ -9,6 +9,7 @@ keywords = ["dlopen", "so", "elf", "ldso"]
 categories = ["no-std", "os", "embedded"]
 license = "Apache-2.0"
 description = "A library for loading elf dynamic libraries from memory and files"
+exclude = [".gitignore", "/test", "/example-dylib"]
 
 [workspace]
 members = ["example-dylib"]
