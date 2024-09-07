@@ -8,13 +8,11 @@ use super::{ELFRelro, ELFSegments, ALIGN};
 
 impl Drop for ELFSegments {
     fn drop(&mut self) {
-        if self.len != isize::MAX as usize {
-            unsafe {
-                dealloc(
-                    self.memory.as_ptr() as _,
-                    Layout::from_size_align_unchecked(self.len, ALIGN),
-                )
-            }
+        unsafe {
+            dealloc(
+                self.memory.as_ptr() as _,
+                Layout::from_size_align_unchecked(self.len, ALIGN),
+            )
         }
     }
 }

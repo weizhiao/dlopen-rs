@@ -22,10 +22,8 @@ impl ELFRelro {
 
 impl Drop for ELFSegments {
     fn drop(&mut self) {
-        if self.len != isize::MAX as _ {
-            unsafe {
-                mman::munmap(self.memory, self.len).unwrap();
-            }
+        unsafe {
+            mman::munmap(self.memory, self.len).unwrap();
         }
     }
 }

@@ -4,7 +4,7 @@ use std::path::Path;
 fn main() {
     let path = Path::new("./target/release/libexample.so");
 
-    let libc = ELFLibrary::load_self("libc").unwrap();
+    let libc = ELFLibrary::sys_load("libc.so.6").unwrap();
 
     let libexample = ELFLibrary::from_file(path)
         .unwrap()

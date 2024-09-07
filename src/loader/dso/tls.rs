@@ -46,7 +46,7 @@ impl ELFTLS {
         }
 
         let align = phdr.p_align as usize;
-        let mut size = (size_of::<Layout>() + align - 1) & (-(align as isize) as usize);
+        let mut size = (size_of::<Layout>() + align - 1) & !(align - 1);
         // 前面用来保存layout
         let offset = size;
         size += phdr.p_memsz as usize;

@@ -12,11 +12,11 @@ use core::{
     ops,
 };
 
-use alloc::{boxed::Box, format, sync::Arc, vec::Vec};
+use alloc::{format, sync::Arc};
+use relocation::InternalLib;
 
 use crate::{find_symbol_error, Result};
 pub use dso::ELFLibrary;
-use dso::InternalLib;
 
 #[derive(Debug)]
 #[allow(unused)]
@@ -26,7 +26,7 @@ pub(crate) enum RelocatedLibraryInner {
     External(ldso::ExternalLib),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct RelocatedLibrary {
     pub(crate) inner: Arc<RelocatedLibraryInner>,
 }
@@ -35,19 +35,6 @@ unsafe impl Send for RelocatedLibrary {}
 unsafe impl Sync for RelocatedLibrary {}
 
 impl RelocatedLibrary {
-    pub(crate) fn new(
-        lib: ELFLibrary,
-        internal_libs: Vec<RelocatedLibrary>,
-        external_libs: Option<Vec<Box<dyn ExternLibrary>>>,
-    ) -> RelocatedLibrary {
-        let inner =
-            RelocatedLibraryInner::Internal(InternalLib::new(lib, internal_libs, external_libs));
-
-        RelocatedLibrary {
-            inner: Arc::new(inner),
-        }
-    }
-
     /// get the dynamic library name
     pub fn name(&self) -> &CStr {
         match self.inner.as_ref() {
@@ -140,7 +127,7 @@ impl Drop for RelocatedLibrary {
         }
     }
 }
-pub trait ExternLibrary: Debug {
+pub trait ExternLibrary {
     /// Get the symbol of the dynamic library, and the return value is the address of the symbol
     /// # Examples
     ///

@@ -1,3 +1,5 @@
+use core::slice::from_raw_parts;
+
 use crate::{
     loader::arch::{Dyn, Phdr, Rela},
     parse_dynamic_error, Result,
@@ -23,13 +25,9 @@ pub(crate) struct ELFDynamic {
 impl ELFDynamic {
     pub(crate) fn new(phdr: &Phdr, segments: &ELFSegments) -> Result<ELFDynamic> {
         let dynamic_start = phdr.p_vaddr as usize;
-        let dynamic_len = phdr.p_memsz as usize / core::mem::size_of::<Dyn>();
-        let dynamics = unsafe {
-            core::slice::from_raw_parts(
-                (segments.base() + dynamic_start) as *const Dyn,
-                dynamic_len,
-            )
-        };
+        let dynamic_len = phdr.p_memsz as usize / size_of::<Dyn>();
+        let dynamics =
+            unsafe { from_raw_parts((segments.base() + dynamic_start) as *const Dyn, dynamic_len) };
 
         let base = segments.base();
 
@@ -87,16 +85,16 @@ impl ELFDynamic {
             ))?;
 
         let pltrel = pltrel_off.map(|pltrel_off| unsafe {
-            core::slice::from_raw_parts(
+            from_raw_parts(
                 segments.as_mut_ptr().add(pltrel_off) as _,
-                pltrel_size.unwrap() / core::mem::size_of::<Rela>(),
+                pltrel_size.unwrap() / size_of::<Rela>(),
             )
         });
 
         let rela = rela_off.map(|rel_off| unsafe {
-            core::slice::from_raw_parts(
+            from_raw_parts(
                 segments.as_mut_ptr().add(rel_off) as _,
-                rela_size.unwrap() / core::mem::size_of::<Rela>(),
+                rela_size.unwrap() / size_of::<Rela>(),
             )
         });
 
@@ -104,22 +102,12 @@ impl ELFDynamic {
 
         let init_array_fn = init_array_off.map(|init_array_off| {
             let ptr = init_array_off + base;
-            unsafe {
-                core::slice::from_raw_parts(
-                    ptr as _,
-                    init_array_size.unwrap() / core::mem::size_of::<usize>(),
-                )
-            }
+            unsafe { from_raw_parts(ptr as _, init_array_size.unwrap() / size_of::<usize>()) }
         });
 
         let fini_array_fn = fini_array_off.map(|fini_array_off| {
             let ptr = fini_array_off + base;
-            unsafe {
-                core::slice::from_raw_parts(
-                    ptr as _,
-                    fini_array_size.unwrap() / core::mem::size_of::<usize>(),
-                )
-            }
+            unsafe { from_raw_parts(ptr as _, fini_array_size.unwrap() / size_of::<usize>()) }
         });
 
         let fini_fn = fini_off.map(|fini_off| unsafe { core::mem::transmute(fini_off + base) });

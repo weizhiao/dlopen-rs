@@ -1,16 +1,15 @@
 //! The `dopen_rs` crate supports loading dynamic libraries from memory and files,
 //! supports `no_std` environments, and does not rely on the dynamic linker `ldso`
 //!
-//! There is currently no support for using backtrace in loaded dynamic library code,
-//! and there is no support for debugging loaded dynamic libraries using gdb
+//! There is no support for debugging loaded dynamic libraries using gdb
 //!
 //! # Examples
 //! ```
 //! use dlopen_rs::ELFLibrary;
 //! use std::path::Path;
 //! let path = Path::new("./target/release/libexample.so");
-//!	let libc = ELFLibrary::ldso_load("libc.so.6").unwrap();
-//!	let libgcc = ELFLibrary::ldso_load("libgcc_s.so.1").unwrap();
+//!	let libc = ELFLibrary::sys_load("libc.so.6").unwrap();
+//!	let libgcc = ELFLibrary::sys_load("libgcc_s.so.1").unwrap();
 //! let libexample = ELFLibrary::from_file(path)
 //!		.unwrap()
 //!		.relocate(&[libgcc, libc])
@@ -22,12 +21,6 @@
 //! 	.unwrap()
 //! };
 //! println!("{}", f(2));
-//! let f = unsafe {
-//! 	libexample
-//! 	.get::<extern "C" fn()>("c_fun_print_something_else")
-//! 	.unwrap()
-//! };
-//! f();
 //! ```
 #![cfg_attr(feature = "nightly", allow(internal_features))]
 #![cfg_attr(feature = "nightly", feature(core_intrinsics))]

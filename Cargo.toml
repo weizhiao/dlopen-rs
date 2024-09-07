@@ -98,5 +98,9 @@ name = "relocate_with"
 required-features = ["mmap", "tls", "libgcc"]
 
 [[example]]
+name = "relocate_with_func"
+required-features = ["mmap", "tls", "libgcc"]
+
+[[example]]
 name = "unwinding"
 required-features = ["mmap", "tls", "unwinding", "ldso", "fde-phdr-dl"]

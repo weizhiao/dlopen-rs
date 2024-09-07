@@ -18,10 +18,7 @@ use alloc::{
 use core::{ffi::CStr, ops::Range};
 use string_table::ELFStringTable;
 
-use super::{
-    arch::{ELFSymbol, Phdr, Rela, PHDR_SIZE},
-    ExternLibrary, RelocatedLibrary,
-};
+use super::arch::{ELFSymbol, Phdr, Rela, PHDR_SIZE};
 
 use crate::{parse_dynamic_error, Result};
 use alloc::vec::Vec;
@@ -36,56 +33,6 @@ use segment::{ELFRelro, ELFSegments, MASK, PAGE_SIZE};
 pub(crate) struct ELFRelocation {
     pub(crate) pltrel: Option<&'static [Rela]>,
     pub(crate) rel: Option<&'static [Rela]>,
-}
-
-#[derive(Debug)]
-#[allow(unused)]
-pub(crate) struct InternalLib {
-    common: CommonElfData,
-    #[cfg(feature = "std")]
-    is_register: core::sync::atomic::AtomicBool,
-    internal_libs: Box<[RelocatedLibrary]>,
-    external_libs: Option<Box<[Box<dyn ExternLibrary>]>>,
-}
-
-impl InternalLib {
-    pub(crate) fn new(
-        lib: ELFLibrary,
-        internal_libs: Vec<RelocatedLibrary>,
-        external_libs: Option<Vec<Box<dyn ExternLibrary>>>,
-    ) -> InternalLib {
-        InternalLib {
-            common: lib.into_common_data(),
-            #[cfg(feature = "std")]
-            is_register: core::sync::atomic::AtomicBool::new(false),
-            internal_libs: internal_libs.into_boxed_slice(),
-            external_libs: external_libs.map(|libs| libs.into_boxed_slice()),
-        }
-    }
-
-    #[cfg(feature = "std")]
-    pub(crate) fn is_register(&self) -> bool {
-        self.is_register.load(core::sync::atomic::Ordering::SeqCst)
-    }
-
-    #[cfg(feature = "std")]
-    /// set is_register true
-    pub(crate) fn register(&self) {
-        self.is_register
-            .store(true, core::sync::atomic::Ordering::SeqCst);
-    }
-
-    pub(crate) fn get_sym(&self, name: &str) -> Option<&ELFSymbol> {
-        self.common.get_sym(name)
-    }
-
-    pub(crate) fn common_data(&self) -> &CommonElfData {
-        &self.common
-    }
-
-    pub(crate) fn name(&self) -> &CStr {
-        self.common.name()
-    }
 }
 
 #[derive(Debug)]
@@ -341,7 +288,6 @@ pub(crate) trait SharedObject: MapSegment {
             for phdr in phdrs {
                 let cur_range = phdr.p_offset as usize..(phdr.p_offset + phdr.p_filesz) as usize;
                 if cur_range.contains(&phdr_range.start) && cur_range.contains(&phdr_range.end) {
-                    debug_assert_eq!((cur_range.end - cur_range.start) % size_of::<Phdr>(), 0);
                     return Some(unsafe {
                         core::slice::from_raw_parts(
                             segments
