@@ -2,6 +2,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::ffi::CStr;
 use core::fmt::Debug;
+use core::sync::atomic::AtomicBool;
 
 use super::{arch::*, builtin::BUILTIN, dso::ELFLibrary};
 use super::{ExternLibrary, RelocatedLibraryInner};
@@ -16,8 +17,6 @@ use elf::abi::*;
 #[allow(unused)]
 pub(crate) struct InternalLib {
     common: CommonElfData,
-    #[cfg(feature = "std")]
-    is_register: core::sync::atomic::AtomicBool,
     libs: Box<[RelocatedLibrary]>,
     user_data: Option<Box<dyn Fn(&str) -> Option<*const ()>>>,
 }
@@ -25,37 +24,36 @@ pub(crate) struct InternalLib {
 impl Debug for InternalLib {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("InternalLib")
-            .field("common", &self.common)
+            .field("name", &self.common.name())
             .field("libs", &self.libs)
             .finish()
     }
 }
 
+impl Drop for InternalLib {
+    fn drop(&mut self) {
+        if let Some(fini) = self.common_data().fini_fn() {
+            fini();
+        }
+        if let Some(fini_array) = self.common_data().fini_array_fn() {
+            for fini in *fini_array {
+                fini();
+            }
+        }
+    }
+}
+
 impl InternalLib {
     pub(crate) fn new(
-        lib: ELFLibrary,
+        common: CommonElfData,
         libs: Vec<RelocatedLibrary>,
         user_data: Option<Box<dyn Fn(&str) -> Option<*const ()> + 'static>>,
     ) -> InternalLib {
         InternalLib {
-            common: lib.into_common_data(),
-            #[cfg(feature = "std")]
-            is_register: core::sync::atomic::AtomicBool::new(false),
+            common,
             libs: libs.into_boxed_slice(),
             user_data,
         }
-    }
-
-    #[cfg(feature = "std")]
-    pub(crate) fn is_register(&self) -> bool {
-        self.is_register.load(core::sync::atomic::Ordering::SeqCst)
-    }
-
-    #[cfg(feature = "std")]
-    /// set is_register true
-    pub(crate) fn register(&self) {
-        self.is_register
-            .store(true, core::sync::atomic::Ordering::SeqCst);
     }
 
     pub(crate) fn get_sym(&self, name: &str) -> Option<&ELFSymbol> {
@@ -97,11 +95,11 @@ impl ELFLibrary {
     ///		.unwrap();
     /// ```
     ///
-    pub fn relocate(self, libs: &[RelocatedLibrary]) -> Result<RelocatedLibrary> {
-        self.relocate_impl(libs, None)
+    pub fn relocate(self, libs: impl Into<Vec<RelocatedLibrary>>) -> Result<RelocatedLibrary> {
+        self.relocate_impl(libs.into(), None)
     }
 
-    /// use internal and external libraries to relocate the current library
+    /// Use both internal and external libraries to relocate the current library
     /// # Examples
     /// ```
     ///#[derive(Debug, Clone)]
@@ -131,7 +129,7 @@ impl ELFLibrary {
     /// It will use extern_libs to relocate current lib firstly
     pub fn relocate_with<T>(
         self,
-        libs: &[RelocatedLibrary],
+        libs: impl Into<Vec<RelocatedLibrary>>,
         extern_libs: Vec<T>,
     ) -> Result<RelocatedLibrary>
     where
@@ -147,7 +145,7 @@ impl ELFLibrary {
             }
             symbol
         };
-        self.relocate_impl(libs, Some(Box::new(func)))
+        self.relocate_impl(libs.into(), Some(Box::new(func)))
     }
 
     /// use internal libraries and function closure to relocate the current library
@@ -176,19 +174,19 @@ impl ELFLibrary {
     /// It will use function closure to relocate current lib firstly
     pub fn relocate_with_func<F>(
         self,
-        libs: &[RelocatedLibrary],
+        libs: impl Into<Vec<RelocatedLibrary>>,
         func: F,
     ) -> Result<RelocatedLibrary>
     where
         F: Fn(&str) -> Option<*const ()> + 'static,
     {
         let func = move |name: &str| func(name);
-        self.relocate_impl(libs, Some(Box::new(func)))
+        self.relocate_impl(libs.into(), Some(Box::new(func)))
     }
 
     fn relocate_impl(
         self,
-        libs: &[RelocatedLibrary],
+        libs: Vec<RelocatedLibrary>,
         func: Option<Box<dyn Fn(&str) -> Option<*const ()> + 'static>>,
     ) -> Result<RelocatedLibrary> {
         let iter = self
@@ -244,7 +242,7 @@ impl ELFLibrary {
                 } else {
                     let mut symbol = None;
                     for lib in libs.iter() {
-                        match lib.inner.as_ref() {
+                        match &lib.inner.as_ref().1 {
                             RelocatedLibraryInner::Internal(lib) => {
                                 if let Some(sym) = lib.get_sym(temp_str_name) {
                                     symbol = Some(SymDef::Internal(InternalSym {
@@ -363,10 +361,18 @@ impl ELFLibrary {
         if let Some(relro) = &self.relro() {
             relro.relro()?;
         }
+        #[cfg(feature = "debug")]
+        unsafe {
+            super::debug::dl_debug_finish();
+        }
+        let common = self.into_common_data();
 
-        let internal_lib = InternalLib::new(self, libs.to_vec(), func);
+        let internal_lib = InternalLib::new(common, libs, func);
         Ok(RelocatedLibrary {
-            inner: Arc::new(super::RelocatedLibraryInner::Internal(internal_lib)),
+            inner: Arc::new((
+                AtomicBool::new(false),
+                super::RelocatedLibraryInner::Internal(internal_lib),
+            )),
         })
     }
 }

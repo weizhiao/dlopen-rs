@@ -10,6 +10,8 @@ use elf::abi::*;
 use super::segment::ELFSegments;
 
 pub(crate) struct ELFDynamic {
+    #[cfg(feature = "debug")]
+    dyn_addr: usize,
     hash_off: usize,
     symtab_off: usize,
     strtab: &'static [u8],
@@ -26,8 +28,8 @@ impl ELFDynamic {
     pub(crate) fn new(phdr: &Phdr, segments: &ELFSegments) -> Result<ELFDynamic> {
         let dynamic_start = phdr.p_vaddr as usize;
         let dynamic_len = phdr.p_memsz as usize / size_of::<Dyn>();
-        let dynamics =
-            unsafe { from_raw_parts((segments.base() + dynamic_start) as *const Dyn, dynamic_len) };
+        let dynamic_addr = segments.base() + dynamic_start;
+        let dynamics = unsafe { from_raw_parts(dynamic_addr as *const Dyn, dynamic_len) };
 
         let base = segments.base();
 
@@ -113,6 +115,8 @@ impl ELFDynamic {
         let fini_fn = fini_off.map(|fini_off| unsafe { core::mem::transmute(fini_off + base) });
 
         Ok(ELFDynamic {
+            #[cfg(feature = "debug")]
+            dyn_addr: dynamic_addr,
             hash_off,
             symtab_off,
             strtab,
@@ -124,6 +128,11 @@ impl ELFDynamic {
             rela,
             needed_libs,
         })
+    }
+
+    #[cfg(feature = "debug")]
+    pub(crate) fn addr(&self) -> usize {
+        self.dyn_addr
     }
 
     pub(crate) fn strtab(&self) -> &'static [u8] {

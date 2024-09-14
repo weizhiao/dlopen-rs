@@ -1,40 +1,34 @@
-use crate::{loader::RelocatedLibraryInner, RelocatedLibrary};
+use crate::RelocatedLibrary;
 use core::ptr::{self, null_mut};
 use hashbrown::HashMap;
 use std::{
     ffi::CString,
-    sync::{LazyLock, RwLock},
+    sync::{Arc, LazyLock, RwLock},
 };
 
 static REGISTER_LIBS: LazyLock<RwLock<HashMap<CString, RelocatedLibrary>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
 
 impl RelocatedLibrary {
-    /// This function can register the loaded dynamic library
-    /// to ensure the correct execution of the dl_iterate_phdr function, 
-	/// so you can use backtrace function in the loaded dynamic library
+    /// Registers the loaded dynamic library to ensure the correct execution
+    /// of the `dl_iterate_phdr` function, allowing the use of the `backtrace`
+    /// function within the loaded dynamic library.
     pub fn register(&self) -> Option<RelocatedLibrary> {
         let mut writer = REGISTER_LIBS.write().unwrap();
-        match self.inner.as_ref() {
-            RelocatedLibraryInner::Internal(lib) => {
-                lib.register();
-                writer.insert(lib.name().to_owned(), self.clone())
-            }
-            #[cfg(feature = "ldso")]
-            RelocatedLibraryInner::External(lib) => {
-                writer.insert(lib.name().to_owned(), self.clone())
-            }
-        }
+        self.set_register();
+        writer.insert(self.name().to_owned(), self.clone())
     }
 }
 
-impl Drop for RelocatedLibraryInner {
+impl Drop for RelocatedLibrary {
     fn drop(&mut self) {
-        #[allow(irrefutable_let_patterns)]
-        if let RelocatedLibraryInner::Internal(lib) = self {
-            if lib.is_register() {
+        if self.is_register() {
+            if Arc::strong_count(&self.inner) == 2 {
                 let mut writer = REGISTER_LIBS.write().unwrap();
-                writer.remove(lib.name());
+                let remove = writer.remove(self.name());
+                //防止死锁
+                drop(writer);
+                drop(remove);
             }
         }
     }

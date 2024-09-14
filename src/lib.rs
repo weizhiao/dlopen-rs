@@ -1,7 +1,7 @@
-//! The `dopen_rs` crate supports loading dynamic libraries from memory and files,
-//! supports `no_std` environments, and does not rely on the dynamic linker `ldso`
-//!
-//! There is no support for debugging loaded dynamic libraries using gdb
+//!dlopen-rs supports loading dynamic libraries from both memory and files, and is compatible with the `no_std` environment.
+//!This gives you greater flexibility in loading and managing dynamic libraries, offering a viable option for using them in no_std contexts.
+//!Additionally, it integrates seamlessly with the system’s dynamic linker in std environments.
+//!Currently, it supports `x86_64`, `x86`, `RV64`, and `AArch64` architectures.
 //!
 //! # Examples
 //! ```

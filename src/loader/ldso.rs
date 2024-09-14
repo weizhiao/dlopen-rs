@@ -1,4 +1,4 @@
-use core::{ffi::CStr, ptr::null};
+use core::{ffi::CStr, fmt::Debug, sync::atomic::AtomicBool};
 use std::{
     ffi::{c_void, CString},
     sync::Arc,
@@ -10,10 +10,21 @@ use crate::{find_lib_error, RelocatedLibrary, Result};
 
 use super::{ELFLibrary, RelocatedLibraryInner};
 
-#[derive(Debug)]
+#[allow(unused)]
 pub(crate) struct ExternalLib {
     name: CString,
     handler: *mut c_void,
+    #[cfg(feature = "debug")]
+    debug: super::debug::DebugInfo,
+}
+
+impl Debug for ExternalLib {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ExternalLib")
+            .field("name", &self.name)
+            .field("handler", &self.handler)
+            .finish()
+    }
 }
 
 impl Drop for ExternalLib {
@@ -38,21 +49,7 @@ impl ExternalLib {
 }
 
 impl ELFLibrary {
-    /// Returns the handle to the main program
-    pub fn load_self() -> Result<RelocatedLibrary> {
-        let handler = unsafe { dlopen(null(), RTLD_NOW | RTLD_LOCAL) };
-        if handler.is_null() {
-            return Err(find_lib_error("get main program handler fail"));
-        }
-        Ok(RelocatedLibrary {
-            inner: Arc::new(RelocatedLibraryInner::External(ExternalLib {
-                name: c"main".to_owned(),
-                handler,
-            })),
-        })
-    }
-
-    /// Use system dynamic linker(ldso) to load the dynamic library, you can use it in the same way as dlopen
+    ///Use the system dynamic linker (ld.so) to load the dynamic library, allowing it to be used in the same way as dlopen.
     /// # Examples
     ///
     /// ```no_run
@@ -68,11 +65,34 @@ impl ELFLibrary {
                 cstr.to_str().unwrap()
             )));
         }
+        #[cfg(feature = "debug")]
+        let debug = unsafe {
+            use super::debug::*;
+            use core::mem::MaybeUninit;
+            use nix::libc::{dlinfo, RTLD_DI_LINKMAP};
+            let debug = {
+                let link_map: MaybeUninit<*const LinkMap> = MaybeUninit::uninit();
+                dlinfo(handler, RTLD_DI_LINKMAP, link_map.as_ptr() as _);
+                let link_map = &*link_map.assume_init();
+                dl_debug_init(
+                    link_map.l_addr as usize,
+                    link_map.l_name,
+                    link_map.l_ld as usize,
+                )
+            };
+            dl_debug_finish();
+            debug
+        };
         Ok(RelocatedLibrary {
-            inner: Arc::new(RelocatedLibraryInner::External(ExternalLib {
-                name: cstr,
-                handler,
-            })),
+            inner: Arc::new((
+                AtomicBool::new(false),
+                RelocatedLibraryInner::External(ExternalLib {
+                    name: cstr,
+                    handler,
+                    #[cfg(feature = "debug")]
+                    debug,
+                }),
+            )),
         })
     }
 }

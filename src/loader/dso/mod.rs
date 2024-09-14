@@ -11,7 +11,6 @@ mod string_table;
 pub(crate) mod tls;
 
 use alloc::{
-    boxed::Box,
     ffi::CString,
     string::{String, ToString},
 };
@@ -35,7 +34,6 @@ pub(crate) struct ELFRelocation {
     pub(crate) rel: Option<&'static [Rela]>,
 }
 
-#[derive(Debug)]
 #[allow(unused)]
 pub(crate) struct CommonElfData {
     /// file name
@@ -60,6 +58,8 @@ pub(crate) struct CommonElfData {
     /// .tbss and .tdata
     #[cfg(feature = "tls")]
     tls: Option<Box<tls::ELFTLS>>,
+    #[cfg(feature = "debug")]
+    link_map: super::debug::DebugInfo,
 }
 
 impl CommonElfData {
@@ -112,7 +112,6 @@ impl CommonElfData {
     }
 }
 
-#[derive(Debug)]
 #[allow(unused)]
 pub(crate) struct ELFLibraryInner {
     common: CommonElfData,
@@ -128,7 +127,6 @@ pub(crate) struct ELFLibraryInner {
     needed_libs: Vec<&'static str>,
 }
 
-#[derive(Debug)]
 pub struct ELFLibrary {
     inner: ELFLibraryInner,
 }
@@ -307,7 +305,7 @@ pub(crate) trait SharedObject: MapSegment {
         }
 
         let dynamics = dynamics.ok_or(parse_dynamic_error("elf file does not have dynamic"))?;
-
+        let name = CString::new(name).unwrap();
         let strtab = ELFStringTable::new(dynamics.strtab());
 
         let needed_libs: Vec<&'static str> = dynamics
@@ -323,10 +321,14 @@ pub(crate) trait SharedObject: MapSegment {
 
         let hashtab = ELFHashTable::parse_gnu_hash(dynamics.hash() as _);
         let symtab = dynamics.dynsym() as _;
+        #[cfg(feature = "debug")]
+        let link_map = unsafe {
+            crate::loader::debug::dl_debug_init(segments.base(), name.as_ptr(), dynamics.addr())
+        };
 
         let elf_lib = ELFLibraryInner {
             common: CommonElfData {
-                name: CString::new(name).unwrap(),
+                name,
                 #[cfg(feature = "std")]
                 phdrs: loaded_phdrs,
                 hashtab,
@@ -338,6 +340,8 @@ pub(crate) trait SharedObject: MapSegment {
                 fini_array_fn: dynamics.fini_array_fn(),
                 #[cfg(feature = "tls")]
                 tls,
+                #[cfg(feature = "debug")]
+                link_map,
             },
             relro,
             relocation,

@@ -60,10 +60,12 @@ default-features = false
 cfg-if = '1.0'
 
 [features]
-default = ["ldso", "mmap", "libgcc", "tls"]
+default = ["ldso", "mmap", "libgcc", "tls", "debug"]
 
 # allows dynamic libraries to be loaded using system dynamic loaders(ldso)
 ldso = ["std", "dep:nix"]
+# enable this when you want to use gdb/lldb to debug the loaded dynamic libraries
+debug = ["std"]
 # enable std
 std = ["dep:nix"]
 # enable this on platforms that support mmap

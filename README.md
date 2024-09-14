@@ -3,21 +3,22 @@
 [![license](https://img.shields.io/crates/l/dlopen-rs.svg)](https://crates.io/crates/dlopen-rs)
 # dlopen-rs
 
-dlopen-rs supports loading dynamic libraries from memory and files, supports `no_std` environment. It gives you more freedom to load and control dynamic libraries, and provides a possible option for using dynamic libraries in `no_std` environment. It also works well with the system's dynamic linker in `std` environment
-
-Currently supports `x86_64`, `x86`, `RV64` and `AArch64`.
+dlopen-rs supports loading dynamic libraries from both memory and files, and is compatible with the `no_std` environment. This gives you greater flexibility in loading and managing dynamic libraries, offering a viable option for using them in no_std contexts. Additionally, it integrates seamlessly with the system’s dynamic linker in std environments.   
+Currently, it supports `x86_64`, `x86`, `RV64`, and `AArch64` architectures.
 
 ## Feature
-| Feature              | Default | Description |
-|--------------------- |---------|-|
-| ldso            | Yes     | Allows dynamic libraries to be loaded using system dynamic loaders(`ldso`) |
-| std          | Yes     | Enable `std` |
-| mmap         | Yes      | Enable this on platforms that support `mmap` |
-| tls         | Yes     | Enable this when you need to use `thread local storage` |
-| nightly | No      | Enable this can make loading `faster`, but you'll need to use the `nightly` compiler |
-| unwinding           | No      | Enable this when you want to use the exception handling mechanism provided by dlopen-rs  |
-| libgcc            | Yes      | Enable this when program uses `libgcc` to handle exceptions |
-| libunwind          | No     | Enable this when program uses `libunwind` to handle exceptions |
+| Feature   | Default | Description                                                                                                                                           |
+| --------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ldso      | Yes     | Allows dynamic libraries to be loaded using system dynamic loaders (ldso).                                                                            |
+| std       | Yes     | Enable `std`                                                                                                                                          |
+| debug     | Yes     | Enable this to use gdb/lldb for debugging loaded dynamic libraries. Note that only dynamic libraries loaded using dlopen-rs can be debugged with gdb. |
+| mmap      | Yes     | Enable this on platforms that support `mmap`                                                                                                          |
+| tls       | Yes     | Enable this to use thread local storage.                                                                                                              |
+| nightly   | No      | Enable this for faster loading, but you’ll need to use the nightly compiler.                                                                          |
+| unwinding | No      | Enable this to use the exception handling mechanism provided by dlopen-rs.                                                                            |
+| libgcc    | Yes     | Enable this if the program uses libgcc to handle exceptions.                                                                                          |
+| libunwind | No      | Enable this if the program uses libunwind to handle exceptions.                                                                                       |
+
 
 ## Example
 ```rust
@@ -60,4 +61,4 @@ fn main() {
 }
 ```
 ## NOTE
-There is currently no support for debugging loaded dynamic libraries using gdb/lldb
+If you encounter any issues while using it or need any new features, feel free to raise an issue on GitHub.

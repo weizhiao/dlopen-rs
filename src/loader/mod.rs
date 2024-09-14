@@ -1,5 +1,7 @@
 mod arch;
 mod builtin;
+#[cfg(feature = "debug")]
+pub(crate) mod debug;
 pub mod dso;
 #[cfg(feature = "ldso")]
 mod ldso;
@@ -10,6 +12,7 @@ use core::{
     fmt::Debug,
     marker::{self, PhantomData},
     ops,
+    sync::atomic::AtomicBool,
 };
 
 use alloc::{format, sync::Arc};
@@ -28,7 +31,7 @@ pub(crate) enum RelocatedLibraryInner {
 
 #[derive(Clone, Debug)]
 pub struct RelocatedLibrary {
-    pub(crate) inner: Arc<RelocatedLibraryInner>,
+    pub(crate) inner: Arc<(AtomicBool, RelocatedLibraryInner)>,
 }
 
 unsafe impl Send for RelocatedLibrary {}
@@ -37,16 +40,28 @@ unsafe impl Sync for RelocatedLibrary {}
 impl RelocatedLibrary {
     /// get the dynamic library name
     pub fn name(&self) -> &CStr {
-        match self.inner.as_ref() {
+        match &self.inner.as_ref().1 {
             RelocatedLibraryInner::Internal(lib) => lib.name(),
             #[cfg(feature = "ldso")]
             RelocatedLibraryInner::External(lib) => lib.name(),
         }
     }
 
+    #[allow(unused)]
+    pub(crate) fn is_register(&self) -> bool {
+        self.inner.0.load(core::sync::atomic::Ordering::Relaxed)
+    }
+
+    #[allow(unused)]
+    pub(crate) fn set_register(&self) {
+        self.inner
+            .0
+            .store(true, core::sync::atomic::Ordering::Relaxed);
+    }
+
     #[cfg(feature = "std")]
     pub(crate) fn into_internal_lib(&self) -> Option<&InternalLib> {
-        match self.inner.as_ref() {
+        match &self.inner.as_ref().1 {
             RelocatedLibraryInner::Internal(lib) => Some(lib),
             #[cfg(feature = "ldso")]
             RelocatedLibraryInner::External(_) => None,
@@ -94,7 +109,7 @@ impl RelocatedLibrary {
     /// };
     /// ```
     pub unsafe fn get<'lib, T>(&'lib self, name: &str) -> Result<Symbol<'lib, T>> {
-        match self.inner.as_ref() {
+        match &self.inner.as_ref().1 {
             RelocatedLibraryInner::Internal(lib) => lib.get_sym(name).map(|sym| Symbol {
                 ptr: (lib.common_data().base() + sym.st_value as usize) as _,
                 pd: PhantomData,
@@ -112,21 +127,6 @@ impl RelocatedLibrary {
     }
 }
 
-impl Drop for RelocatedLibrary {
-    fn drop(&mut self) {
-        #[allow(irrefutable_let_patterns)]
-        if let RelocatedLibraryInner::Internal(lib) = self.inner.as_ref() {
-            if let Some(fini) = lib.common_data().fini_fn() {
-                fini();
-            }
-            if let Some(fini_array) = lib.common_data().fini_array_fn() {
-                for fini in *fini_array {
-                    fini();
-                }
-            }
-        }
-    }
-}
 pub trait ExternLibrary {
     /// Get the symbol of the dynamic library, and the return value is the address of the symbol
     /// # Examples
