@@ -47,14 +47,14 @@ pub(crate) unsafe extern "C" fn dl_iterate_phdr_impl(
     use nix::libc::dl_phdr_info;
     let reader = REGISTER_LIBS.read().unwrap();
     let mut ret = nix::libc::dl_iterate_phdr(callback, data);
-    for lib in reader.values().filter_map(|lib| lib.into_internal_lib()) {
-        let (dlpi_phdr, dlpi_phnum) = lib
-            .common_data()
+    for lib in reader.values().filter(|lib| lib.get_extra_data().is_some()) {
+        let extra = lib.get_extra_data().unwrap();
+        let (dlpi_phdr, dlpi_phnum) = extra
             .phdrs()
             .map(|phdrs| (phdrs.as_ptr().cast(), phdrs.len() as _))
             .unwrap_or((ptr::null(), 0));
         let mut info = dl_phdr_info {
-            dlpi_addr: lib.common_data().base() as _,
+            dlpi_addr: lib.base() as _,
             dlpi_name: lib.name().as_ptr().cast(),
             dlpi_phdr,
             dlpi_phnum,

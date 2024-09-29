@@ -22,9 +22,8 @@ pub(crate) struct ELFFile {
 }
 
 impl ELFFile {
-    pub(crate) fn new<P: AsRef<std::ffi::OsStr>>(path: P) -> Result<ELFFile> {
-        let file = File::open(path.as_ref())?;
-        Ok(ELFFile { file })
+    pub(crate) fn new(file: File) -> ELFFile {
+        ELFFile { file }
     }
 }
 

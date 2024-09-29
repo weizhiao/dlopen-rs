@@ -1,7 +1,6 @@
 use crate::Result;
-use core::ffi::CStr;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct ELFStringTable<'data> {
     data: &'data [u8],
 }
@@ -9,11 +8,6 @@ pub(crate) struct ELFStringTable<'data> {
 impl<'data> ELFStringTable<'data> {
     pub(crate) fn new(data: &'data [u8]) -> Self {
         ELFStringTable { data }
-    }
-
-    pub(crate) fn get_cstr(&self, offset: usize) -> Result<&'data CStr> {
-        let start = self.data.get(offset..).unwrap();
-        Ok(unsafe { CStr::from_ptr(start.as_ptr() as _) })
     }
 
     pub(crate) fn get_str(&self, offset: usize) -> Result<&'data str> {

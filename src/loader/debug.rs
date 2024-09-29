@@ -16,8 +16,7 @@ const RT_DELETE: c_int = 2;
 // 	struct link_map *l_next, *l_prev;
 // };
 #[repr(C)]
-#[derive(Debug)]
-pub(crate) struct LinkMap {
+struct LinkMap {
     pub l_addr: *mut c_void,
     pub l_name: *const c_char,
     pub l_ld: *mut Dyn,
@@ -133,15 +132,9 @@ pub(crate) unsafe fn dl_debug_init(base: usize, name: *const i8, dynamic: usize)
     custom_debug.tail = link_map;
     debug.state = RT_ADD;
     (debug.brk)();
-
+    debug.state = RT_CONSISTENT;
+    (debug.brk)();
     DebugInfo {
         link_map: Box::from_raw(link_map),
     }
-}
-
-pub(crate) unsafe fn dl_debug_finish() {
-    let mut custom_debug = DEBUG.lock().unwrap();
-    let debug = &mut *custom_debug.debug;
-    debug.state = RT_CONSISTENT;
-    (debug.brk)();
 }

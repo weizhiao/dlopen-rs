@@ -12,21 +12,65 @@ use core::{
     fmt::Debug,
     marker::{self, PhantomData},
     ops,
-    sync::atomic::AtomicBool,
+    sync::atomic::{AtomicBool, Ordering},
 };
 
-use alloc::{format, sync::Arc};
-use relocation::InternalLib;
+use alloc::{ffi::CString, format, sync::Arc};
+use arch::ELFSymbol;
+use dso::{version::SymbolRequireVersion, ExtraData, SymbolData};
 
 use crate::{find_symbol_error, Result};
 pub use dso::ELFLibrary;
 
-#[derive(Debug)]
 #[allow(unused)]
-pub(crate) enum RelocatedLibraryInner {
-    Internal(InternalLib),
+enum LibraryExtraData {
+    Internal(ExtraData),
     #[cfg(feature = "ldso")]
-    External(ldso::ExternalLib),
+    External(ldso::ExtraData),
+}
+
+impl Drop for LibraryExtraData {
+    fn drop(&mut self) {
+        if let LibraryExtraData::Internal(extra) = self {
+            if let Some(fini) = extra.fini_fn() {
+                fini();
+            }
+            if let Some(fini_array) = extra.fini_array_fn() {
+                for fini in fini_array {
+                    fini();
+                }
+            }
+        }
+    }
+}
+
+#[allow(unused)]
+pub(crate) struct RelocatedLibraryInner {
+    name: CString,
+    base: usize,
+    symbols: SymbolData,
+    tls: Option<usize>,
+    extra: LibraryExtraData,
+}
+
+impl Debug for RelocatedLibraryInner {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("RelocatedLibraryInner").finish()
+    }
+}
+
+impl RelocatedLibraryInner {
+    pub(crate) fn get_sym(
+        &self,
+        name: &str,
+        version: &Option<SymbolRequireVersion>,
+    ) -> Option<(&ELFSymbol, usize)> {
+        self.symbols.get_sym(name, version)
+    }
+
+    pub(crate) fn tls(&self) -> Option<usize> {
+        self.tls
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -38,34 +82,44 @@ unsafe impl Send for RelocatedLibrary {}
 unsafe impl Sync for RelocatedLibrary {}
 
 impl RelocatedLibrary {
+    /// get dependence libraries
+    pub fn dep_libs(&self) -> Option<&Vec<RelocatedLibrary>> {
+        match &self.inner().extra {
+            LibraryExtraData::Internal(extra_data) => extra_data.get_dep_libs(),
+            LibraryExtraData::External(_) => None,
+        }
+    }
+
     /// get the dynamic library name
     pub fn name(&self) -> &CStr {
-        match &self.inner.as_ref().1 {
-            RelocatedLibraryInner::Internal(lib) => lib.name(),
-            #[cfg(feature = "ldso")]
-            RelocatedLibraryInner::External(lib) => lib.name(),
-        }
+        &self.inner().name
     }
 
     #[allow(unused)]
     pub(crate) fn is_register(&self) -> bool {
-        self.inner.0.load(core::sync::atomic::Ordering::Relaxed)
+        self.inner.0.load(Ordering::Relaxed)
     }
 
     #[allow(unused)]
     pub(crate) fn set_register(&self) {
-        self.inner
-            .0
-            .store(true, core::sync::atomic::Ordering::Relaxed);
+        self.inner.0.store(true, Ordering::Relaxed);
     }
 
     #[cfg(feature = "std")]
-    pub(crate) fn into_internal_lib(&self) -> Option<&InternalLib> {
-        match &self.inner.as_ref().1 {
-            RelocatedLibraryInner::Internal(lib) => Some(lib),
+    pub(crate) fn get_extra_data(&self) -> Option<&ExtraData> {
+        match &self.inner().extra {
+            LibraryExtraData::Internal(lib) => Some(lib),
             #[cfg(feature = "ldso")]
-            RelocatedLibraryInner::External(_) => None,
+            LibraryExtraData::External(_) => None,
         }
+    }
+
+    pub(crate) fn inner(&self) -> &RelocatedLibraryInner {
+        &self.inner.1
+    }
+
+    pub(crate) fn base(&self) -> usize {
+        self.inner().base
     }
 
     /// Get a pointer to a function or static variable by symbol name.
@@ -109,21 +163,15 @@ impl RelocatedLibrary {
     /// };
     /// ```
     pub unsafe fn get<'lib, T>(&'lib self, name: &str) -> Result<Symbol<'lib, T>> {
-        match &self.inner.as_ref().1 {
-            RelocatedLibraryInner::Internal(lib) => lib.get_sym(name).map(|sym| Symbol {
-                ptr: (lib.common_data().base() + sym.st_value as usize) as _,
+        self.inner
+            .as_ref()
+            .1
+            .get_sym(name, &None)
+            .map(|(sym, _)| Symbol {
+                ptr: (self.base() + sym.st_value as usize) as _,
                 pd: PhantomData,
-            }),
-            #[cfg(feature = "ldso")]
-            RelocatedLibraryInner::External(lib) => {
-                let name = alloc::ffi::CString::new(name).unwrap();
-                lib.get_sym(&name).map(|sym| Symbol {
-                    ptr: sym as _,
-                    pd: PhantomData,
-                })
-            }
-        }
-        .ok_or(find_symbol_error(format!("can not find symbol:{}", name)))
+            })
+            .ok_or(find_symbol_error(format!("can not find symbol:{}", name)))
     }
 }
 

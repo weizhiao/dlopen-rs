@@ -1,31 +1,36 @@
-pub(crate) mod binary;
-mod dynamic;
+mod binary;
+pub(crate) mod dynamic;
 mod ehdr;
 mod ehframe;
 #[cfg(feature = "std")]
-pub(crate) mod file;
-mod hash_table;
+mod file;
+pub(crate) mod hashtab;
 mod segment;
-mod string_table;
+pub(crate) mod strtab;
 #[cfg(feature = "tls")]
 pub(crate) mod tls;
+pub(crate) mod version;
 
 use alloc::{
     ffi::CString,
     string::{String, ToString},
 };
-use core::{ffi::CStr, ops::Range};
-use string_table::ELFStringTable;
+use core::{fmt::Debug, ops::Range};
+use strtab::ELFStringTable;
+use version::{ELFVersion, SymbolRequireVersion};
 
-use super::arch::{ELFSymbol, Phdr, Rela, PHDR_SIZE};
+use super::{
+    arch::{ELFSymbol, Phdr, Rela, PHDR_SIZE},
+    LibraryExtraData, RelocatedLibrary, RelocatedLibraryInner,
+};
 
 use crate::{parse_dynamic_error, Result};
 use alloc::vec::Vec;
 use binary::ELFBinary;
-use dynamic::ELFDynamic;
+use dynamic::ELFRawDynamic;
 use ehframe::EhFrame;
 use elf::abi::*;
-use hash_table::ELFHashTable;
+use hashtab::ELFGnuHash;
 use segment::{ELFRelro, ELFSegments, MASK, PAGE_SIZE};
 
 #[derive(Debug)]
@@ -34,19 +39,47 @@ pub(crate) struct ELFRelocation {
     pub(crate) rel: Option<&'static [Rela]>,
 }
 
+#[derive(Debug)]
+pub(crate) struct SymbolData {
+    /// .gnu.hash
+    pub hashtab: ELFGnuHash,
+    /// .dynsym
+    pub symtab: *const ELFSymbol,
+    /// .dynstr
+    pub strtab: ELFStringTable<'static>,
+    /// .gnu.version
+    pub version: Option<ELFVersion>,
+}
+
+impl SymbolData {
+    pub(crate) fn get_sym(
+        &self,
+        name: &str,
+        version: &Option<SymbolRequireVersion>,
+    ) -> Option<(&ELFSymbol, usize)> {
+        let symbol = unsafe {
+            self.hashtab
+                .find(name.as_bytes(), self.symtab, &self.strtab)
+        };
+        symbol
+    }
+
+    pub(crate) fn rel_symbol(
+        &self,
+        idx: usize,
+    ) -> (&ELFSymbol, &str, Option<SymbolRequireVersion>) {
+        let symbol = unsafe { &*self.symtab.add(idx) };
+        let name = self.strtab.get_str(symbol.st_name as usize).unwrap();
+        let require = self.get_requirement(idx);
+        (symbol, name, require)
+    }
+}
+
 #[allow(unused)]
-pub(crate) struct CommonElfData {
-    /// file name
-    name: CString,
+pub(crate) struct ExtraData {
     /// phdrs
     #[cfg(feature = "std")]
     phdrs: Option<&'static [Phdr]>,
-    /// .gnu.hash
-    hashtab: ELFHashTable,
-    /// .dynsym
-    symtab: *const ELFSymbol,
-    /// .dynstr
-    strtab: ELFStringTable<'static>,
     /// .eh_frame
     unwind: Option<EhFrame>,
     /// semgents
@@ -58,26 +91,19 @@ pub(crate) struct CommonElfData {
     /// .tbss and .tdata
     #[cfg(feature = "tls")]
     tls: Option<Box<tls::ELFTLS>>,
+    /// debug link map
     #[cfg(feature = "debug")]
     link_map: super::debug::DebugInfo,
+    /// user data
+    user_data: Option<Box<dyn Fn(&str) -> Option<*const ()>>>,
+    /// dependency libraries
+    dep_libs: Option<Vec<RelocatedLibrary>>,
 }
 
-impl CommonElfData {
-    pub(crate) fn get_sym(&self, name: &str) -> Option<&ELFSymbol> {
-        let symbol = unsafe {
-            self.hashtab
-                .find(name.as_bytes(), self.symtab, &self.strtab)
-        };
-        symbol
-    }
-
+impl ExtraData {
     #[cfg(feature = "std")]
     pub(crate) fn phdrs(&self) -> Option<&[Phdr]> {
         self.phdrs
-    }
-
-    pub(crate) fn name(&self) -> &CStr {
-        &self.name
     }
 
     #[inline]
@@ -86,35 +112,46 @@ impl CommonElfData {
     }
 
     #[inline]
-    pub(crate) fn symtab(&self) -> *const ELFSymbol {
-        self.symtab
-    }
-
-    #[inline]
-    pub(crate) fn strtab(&self) -> &ELFStringTable {
-        &self.strtab
-    }
-
-    #[inline]
-    pub(crate) fn fini_fn(&self) -> &Option<extern "C" fn()> {
-        &self.fini_fn
-    }
-
-    #[inline]
-    pub(crate) fn fini_array_fn(&self) -> &Option<&'static [extern "C" fn()]> {
-        &self.fini_array_fn
-    }
-
-    #[inline]
     #[cfg(feature = "tls")]
     pub(crate) fn tls(&self) -> Option<*const tls::ELFTLS> {
         self.tls.as_ref().map(|val| val.as_ref() as _)
+    }
+
+    #[inline]
+    pub(crate) fn set_user_data(
+        &mut self,
+        user_data: Option<Box<dyn Fn(&str) -> Option<*const ()>>>,
+    ) {
+        self.user_data = user_data;
+    }
+
+    #[inline]
+    pub(crate) fn set_dep_libs(&mut self, dep_libs: Vec<RelocatedLibrary>) {
+        self.dep_libs = Some(dep_libs);
+    }
+
+    #[inline]
+    pub(crate) fn get_dep_libs(&self) -> Option<&Vec<RelocatedLibrary>> {
+        self.dep_libs.as_ref()
+    }
+
+    pub(crate) fn fini_fn(&self) -> Option<extern "C" fn()> {
+        self.fini_fn
+    }
+
+    pub(crate) fn fini_array_fn(&self) -> Option<&[extern "C" fn()]> {
+        self.fini_array_fn
     }
 }
 
 #[allow(unused)]
 pub(crate) struct ELFLibraryInner {
-    common: CommonElfData,
+    /// file name
+    name: CString,
+    /// elf symbols
+    symbols: SymbolData,
+    /// common elf data
+    extra: ExtraData,
     /// rela.dyn and rela.plt
     relocation: ELFRelocation,
     /// GNU_RELRO segment
@@ -129,6 +166,18 @@ pub(crate) struct ELFLibraryInner {
 
 pub struct ELFLibrary {
     inner: ELFLibraryInner,
+}
+
+impl From<ELFLibrary> for RelocatedLibraryInner {
+    fn from(value: ELFLibrary) -> Self {
+        RelocatedLibraryInner {
+            name: value.inner.name,
+            base: value.inner.extra.base(),
+            symbols: value.inner.symbols,
+            tls: value.inner.extra.tls().map(|tls| tls as usize),
+            extra: LibraryExtraData::Internal(value.inner.extra),
+        }
+    }
 }
 
 impl ELFLibrary {
@@ -151,8 +200,16 @@ impl ELFLibrary {
     #[cfg(feature = "std")]
     pub fn from_file<P: AsRef<std::ffi::OsStr>>(path: P) -> Result<ELFLibrary> {
         let file_name = path.as_ref().to_str().unwrap().to_string();
-        let mut file = super::dso::file::ELFFile::new(path)?;
+        let file = std::fs::File::open(path.as_ref())?;
+        let mut file = super::dso::file::ELFFile::new(file);
         let inner = file.load(file_name)?;
+        Ok(ELFLibrary { inner })
+    }
+
+    #[cfg(feature = "std")]
+    pub fn from_open_file(file: std::fs::File, name: impl ToString) -> Result<ELFLibrary> {
+        let mut file = super::dso::file::ELFFile::new(file);
+        let inner = file.load(name.to_string())?;
         Ok(ELFLibrary { inner })
     }
 
@@ -172,18 +229,13 @@ impl ELFLibrary {
     }
 
     /// get the name of the dependent libraries
-    pub fn needed_libs(&self) -> &Vec<&str> {
-        &self.inner.needed_libs
+    pub fn needed_libs(&mut self) -> Vec<&str> {
+        core::mem::take(&mut self.inner.needed_libs)
     }
 
     #[inline]
-    pub(crate) fn common_data(&self) -> &CommonElfData {
-        &self.inner.common
-    }
-
-    #[inline]
-    pub(crate) fn into_common_data(self) -> CommonElfData {
-        self.inner.common
+    pub(crate) fn common_data(&self) -> &ExtraData {
+        &self.inner.extra
     }
 
     #[inline]
@@ -196,16 +248,6 @@ impl ELFLibrary {
     }
 
     #[inline]
-    pub(crate) fn symtab(&self) -> *const ELFSymbol {
-        self.inner.common.symtab()
-    }
-
-    #[inline]
-    pub(crate) fn strtab(&self) -> &ELFStringTable {
-        &self.inner.common.strtab()
-    }
-
-    #[inline]
     pub(crate) fn init_fn(&self) -> &Option<extern "C" fn()> {
         &self.inner.init_fn
     }
@@ -213,6 +255,27 @@ impl ELFLibrary {
     #[inline]
     pub(crate) fn init_array_fn(&self) -> &Option<&'static [extern "C" fn()]> {
         &self.inner.init_array_fn
+    }
+
+    pub(crate) fn symbols(&self) -> &SymbolData {
+        &self.inner.symbols
+    }
+
+    pub(crate) fn name(&self) -> &str {
+        self.inner.name.to_str().unwrap()
+    }
+
+    #[inline]
+    pub(crate) fn set_user_data(
+        &mut self,
+        user_data: Option<Box<dyn Fn(&str) -> Option<*const ()>>>,
+    ) {
+        self.inner.extra.set_user_data(user_data);
+    }
+
+    #[inline]
+    pub(crate) fn set_dep_libs(&mut self, dep_libs: Vec<RelocatedLibrary>) {
+        self.inner.extra.set_dep_libs(dep_libs);
     }
 }
 
@@ -265,11 +328,15 @@ pub(crate) trait SharedObject: MapSegment {
         for phdr in phdrs {
             match phdr.p_type {
                 PT_LOAD => self.load_segment(&segments, phdr)?,
-                PT_DYNAMIC => dynamics = Some(ELFDynamic::new(phdr, &segments)?),
+                PT_DYNAMIC => {
+                    dynamics = Some(ELFRawDynamic::new(
+                        (phdr.p_vaddr as usize + segments.base()) as _,
+                    )?)
+                }
                 PT_GNU_EH_FRAME => unwind = Some(EhFrame::new(phdr, &segments)?),
                 PT_GNU_RELRO => relro = Some(ELFRelro::new(phdr, &segments)),
                 #[cfg(feature = "tls")]
-                PT_TLS => tls = Some(Box::new(unsafe { tls::ELFTLS::new(phdr, &segments)? })),
+                PT_TLS => tls = Some(unsafe { tls::ELFTLS::new(phdr, &segments)? }),
                 PT_PHDR => {
                     loaded_phdrs = Some(unsafe {
                         core::slice::from_raw_parts(
@@ -304,36 +371,29 @@ pub(crate) trait SharedObject: MapSegment {
             unwind_info.register_unwind(&segments);
         }
 
-        let dynamics = dynamics.ok_or(parse_dynamic_error("elf file does not have dynamic"))?;
+        let dynamics = dynamics
+            .ok_or(parse_dynamic_error("elf file does not have dynamic"))?
+            .finish(segments.base());
         let name = CString::new(name).unwrap();
-        let strtab = ELFStringTable::new(dynamics.strtab());
-
-        let needed_libs: Vec<&'static str> = dynamics
-            .needed_libs()
-            .iter()
-            .map(|needed_lib| strtab.get_str(*needed_lib).unwrap())
-            .collect();
-
         let relocation = ELFRelocation {
             pltrel: dynamics.pltrel(),
             rel: dynamics.rela(),
         };
-
-        let hashtab = ELFHashTable::parse_gnu_hash(dynamics.hash() as _);
-        let symtab = dynamics.dynsym() as _;
         #[cfg(feature = "debug")]
         let link_map = unsafe {
             crate::loader::debug::dl_debug_init(segments.base(), name.as_ptr(), dynamics.addr())
         };
-
         let elf_lib = ELFLibraryInner {
-            common: CommonElfData {
-                name,
+            name,
+            symbols: SymbolData {
+                hashtab: dynamics.hashtab(),
+                symtab: dynamics.symtab(),
+                strtab: dynamics.strtab(),
+                version: dynamics.version(),
+            },
+            extra: ExtraData {
                 #[cfg(feature = "std")]
                 phdrs: loaded_phdrs,
-                hashtab,
-                symtab,
-                strtab,
                 unwind,
                 segments,
                 fini_fn: dynamics.fini_fn(),
@@ -342,12 +402,14 @@ pub(crate) trait SharedObject: MapSegment {
                 tls,
                 #[cfg(feature = "debug")]
                 link_map,
+                user_data: None,
+                dep_libs: None,
             },
             relro,
             relocation,
             init_fn: dynamics.init_fn(),
             init_array_fn: dynamics.init_array_fn(),
-            needed_libs,
+            needed_libs: dynamics.needed_libs(),
         };
         Ok(elf_lib)
     }

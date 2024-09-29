@@ -17,6 +17,7 @@ resolver = "2"
 
 [dev-dependencies]
 libloading = "0.8.0"
+criterion = { version = "0.5.1", features = ["html_reports"] }
 
 [dependencies.spin]
 version = "0.9.8"

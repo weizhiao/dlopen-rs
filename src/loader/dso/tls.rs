@@ -21,7 +21,6 @@ pub(crate) struct TLSIndex {
     ti_offset: usize,
 }
 
-#[derive(Debug)]
 pub(crate) struct ELFTLS {
     image: *const u8,
     len: usize,
@@ -30,8 +29,10 @@ pub(crate) struct ELFTLS {
     key: pthread_key_t,
 }
 
+const MAX_TLS_INDEX: usize = 4096;
+
 impl ELFTLS {
-    pub(crate) unsafe fn new(phdr: &Phdr, segments: &ELFSegments) -> Result<ELFTLS> {
+    pub(crate) unsafe fn new(phdr: &Phdr, segments: &ELFSegments) -> Result<Box<ELFTLS>> {
         unsafe extern "C" fn dtor(ptr: *mut c_void) {
             if !ptr.is_null() {
                 let layout = ptr.cast::<Layout>().read();
@@ -52,13 +53,15 @@ impl ELFTLS {
         size += phdr.p_memsz as usize;
         let layout = Layout::from_size_align_unchecked(size, align);
 
-        Ok(ELFTLS {
+        let tls = Box::new(ELFTLS {
             image: segments.as_mut_ptr().add(phdr.p_vaddr as usize),
             len: phdr.p_filesz as usize,
             key: key.assume_init(),
             layout,
             offset,
-        })
+        });
+        assert!((tls.as_ref() as *const _ as usize) > MAX_TLS_INDEX);
+        Ok(tls)
     }
 }
 
@@ -69,24 +72,30 @@ impl Drop for ELFTLS {
 }
 
 pub(crate) unsafe extern "C" fn tls_get_addr(tls_index: &TLSIndex) -> *const u8 {
-    let tls = &*(tls_index.ti_module as *const ELFTLS);
-    let val = pthread_getspecific(tls.key);
-    let data = if val.is_null() {
-        let layout = tls.layout;
-        let memory = alloc::alloc::alloc_zeroed(layout);
-        if memory.is_null() {
-            handle_alloc_error(layout);
-        }
-        memory.cast::<Layout>().write(layout);
-        let data = memory.add(tls.offset);
-        data.copy_from_nonoverlapping(tls.image, tls.len);
-        if pthread_setspecific(tls.key, memory.cast()) != 0 {
-            return core::ptr::null();
-        }
-        data
+    if tls_index.ti_module > MAX_TLS_INDEX {
+        let tls = &*(tls_index.ti_module as *const ELFTLS);
+        let val = pthread_getspecific(tls.key);
+        let data = if val.is_null() {
+            let layout = tls.layout;
+            let memory = alloc::alloc::alloc_zeroed(layout);
+            if memory.is_null() {
+                handle_alloc_error(layout);
+            }
+            memory.cast::<Layout>().write(layout);
+            let data = memory.add(tls.offset);
+            data.copy_from_nonoverlapping(tls.image, tls.len);
+            if pthread_setspecific(tls.key, memory.cast()) != 0 {
+                return core::ptr::null();
+            }
+            data
+        } else {
+            val.add(tls.offset).cast()
+        };
+        data.add(tls_index.ti_offset.wrapping_add(TLS_DTV_OFFSET))
     } else {
-        val.add(tls.offset).cast()
-    };
-
-    data.add(tls_index.ti_offset.wrapping_add(TLS_DTV_OFFSET))
+        extern "C" {
+            fn __tls_get_addr(tls_index: &TLSIndex) -> *const u8;
+        }
+        __tls_get_addr(tls_index)
+    }
 }

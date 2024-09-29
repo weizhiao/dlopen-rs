@@ -1,12 +1,9 @@
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::ffi::CStr;
-use core::fmt::Debug;
 use core::sync::atomic::AtomicBool;
 
+use super::ExternLibrary;
 use super::{arch::*, builtin::BUILTIN, dso::ELFLibrary};
-use super::{ExternLibrary, RelocatedLibraryInner};
-use crate::loader::dso::CommonElfData;
 use crate::relocate_error;
 use crate::RelocatedLibrary;
 use crate::Result;
@@ -15,69 +12,10 @@ use alloc::format;
 use elf::abi::*;
 
 #[allow(unused)]
-pub(crate) struct InternalLib {
-    common: CommonElfData,
-    libs: Box<[RelocatedLibrary]>,
-    user_data: Option<Box<dyn Fn(&str) -> Option<*const ()>>>,
-}
-
-impl Debug for InternalLib {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("InternalLib")
-            .field("name", &self.common.name())
-            .field("libs", &self.libs)
-            .finish()
-    }
-}
-
-impl Drop for InternalLib {
-    fn drop(&mut self) {
-        if let Some(fini) = self.common_data().fini_fn() {
-            fini();
-        }
-        if let Some(fini_array) = self.common_data().fini_array_fn() {
-            for fini in *fini_array {
-                fini();
-            }
-        }
-    }
-}
-
-impl InternalLib {
-    pub(crate) fn new(
-        common: CommonElfData,
-        libs: Vec<RelocatedLibrary>,
-        user_data: Option<Box<dyn Fn(&str) -> Option<*const ()> + 'static>>,
-    ) -> InternalLib {
-        InternalLib {
-            common,
-            libs: libs.into_boxed_slice(),
-            user_data,
-        }
-    }
-
-    pub(crate) fn get_sym(&self, name: &str) -> Option<&ELFSymbol> {
-        self.common.get_sym(name)
-    }
-
-    pub(crate) fn common_data(&self) -> &CommonElfData {
-        &self.common
-    }
-
-    pub(crate) fn name(&self) -> &CStr {
-        self.common.name()
-    }
-}
-
-struct InternalSym<'temp> {
+struct SymDef<'temp> {
     sym: &'temp ELFSymbol,
-    dso: &'temp CommonElfData,
-}
-
-#[allow(unused)]
-enum SymDef<'temp> {
-    Internal(InternalSym<'temp>),
-    External(*const ()),
+    base: usize,
+    tls: Option<usize>,
 }
 
 impl ELFLibrary {
@@ -185,7 +123,7 @@ impl ELFLibrary {
     }
 
     fn relocate_impl(
-        self,
+        mut self,
         libs: Vec<RelocatedLibrary>,
         func: Option<Box<dyn Fn(&str) -> Option<*const ()> + 'static>>,
     ) -> Result<RelocatedLibrary> {
@@ -213,13 +151,12 @@ impl ELFLibrary {
                     }
                     None
                 })
-                .or_else(|| {
-                    symdef.map(|symdef| match symdef {
-                        SymDef::Internal(sym) => (sym.dso.base() + sym.sym.st_value as usize) as _,
-                        SymDef::External(sym) => sym,
-                    })
-                })
-                .ok_or(relocate_error(format!("can not relocate symbol {}", name)))
+                .or_else(|| symdef.map(|symdef| (symdef.base + symdef.sym.st_value as usize) as _))
+                .ok_or(relocate_error(format!(
+                    "{}: can not find symbol {} in dependency libraries",
+                    self.name(),
+                    name
+                )))
         };
 
         for rela in iter {
@@ -227,38 +164,24 @@ impl ELFLibrary {
             let r_sym = rela.r_info as usize >> REL_BIT;
             let mut str_name = None;
             let symdef = if r_sym != 0 {
-                let dynsym = unsafe { &*self.symtab().add(r_sym) };
-                let temp_cstr_name = self
-                    .strtab()
-                    .get_cstr(dynsym.st_name as usize)
-                    .map_err(relocate_error)?;
-                let temp_str_name = temp_cstr_name.to_str().unwrap();
+                let (dynsym, temp_str_name, version) = self.symbols().rel_symbol(r_sym);
                 str_name = Some(temp_str_name);
                 if dynsym.st_shndx != SHN_UNDEF {
-                    Some(SymDef::Internal(InternalSym {
+                    Some(SymDef {
                         sym: dynsym,
-                        dso: self.common_data(),
-                    }))
+                        base: self.common_data().base(),
+                        tls: self.common_data().tls().map(|tls| tls as usize),
+                    })
                 } else {
                     let mut symbol = None;
                     for lib in libs.iter() {
-                        match &lib.inner.as_ref().1 {
-                            RelocatedLibraryInner::Internal(lib) => {
-                                if let Some(sym) = lib.get_sym(temp_str_name) {
-                                    symbol = Some(SymDef::Internal(InternalSym {
-                                        sym,
-                                        dso: lib.common_data(),
-                                    }));
-                                    break;
-                                }
-                            }
-                            #[cfg(feature = "ldso")]
-                            RelocatedLibraryInner::External(lib) => {
-                                if let Some(sym) = lib.get_sym(temp_cstr_name) {
-                                    symbol = Some(SymDef::External(sym));
-                                    break;
-                                }
-                            }
+                        if let Some((sym, sym_idx)) = lib.inner().get_sym(temp_str_name, &version) {
+                            symbol = Some(SymDef {
+                                sym,
+                                base: lib.base(),
+                                tls: lib.inner().tls(),
+                            });
+                            break;
                         }
                     }
                     symbol
@@ -296,20 +219,11 @@ impl ELFLibrary {
                 REL_DTPMOD => {
                     if r_sym != 0 {
                         let symdef = symdef.ok_or(relocate_error(format!(
-                            "can not relocate symbol {}",
+                            "{}: can not relocate symbol {}",
+                            self.name(),
                             str_name.unwrap()
                         )))?;
-                        match symdef {
-                            SymDef::Internal(def) => {
-                                write_val(rela.r_offset as usize, def.dso.tls().unwrap() as usize)
-                            }
-                            SymDef::External(_) => {
-                                return Err(relocate_error(format!(
-                                    "can not relocate symbol {}",
-                                    str_name.unwrap()
-                                )));
-                            }
-                        }
+                        write_val(rela.r_offset as usize, symdef.tls.unwrap());
                     } else {
                         write_val(
                             rela.r_offset as usize,
@@ -319,16 +233,11 @@ impl ELFLibrary {
                 }
                 #[cfg(feature = "tls")]
                 REL_DTPOFF => {
-                    let symdef = if let SymDef::Internal(def) = symdef.ok_or(relocate_error(
-                        format!("can not relocate symbol {}", str_name.unwrap()),
-                    ))? {
-                        def
-                    } else {
-                        return Err(relocate_error(format!(
-                            "can not relocate symbol {}",
-                            str_name.unwrap()
-                        )));
-                    };
+                    let symdef = symdef.ok_or(relocate_error(format!(
+                        "{}: can not relocate symbol {}",
+                        self.name(),
+                        str_name.unwrap()
+                    )))?;
                     // offset in tls
                     let tls_val = (symdef.sym.st_value as usize + rela.r_addend as usize)
                         .wrapping_sub(TLS_DTV_OFFSET);
@@ -341,7 +250,8 @@ impl ELFLibrary {
                     // 而线程栈里保存的东西完全是由libc控制的
 
                     return Err(relocate_error(format!(
-                        "unsupport relocate type {}",
+                        "{}:unsupport relocate type {}",
+                        self.name(),
                         r_type
                     )));
                 }
@@ -361,18 +271,12 @@ impl ELFLibrary {
         if let Some(relro) = &self.relro() {
             relro.relro()?;
         }
-        #[cfg(feature = "debug")]
-        unsafe {
-            super::debug::dl_debug_finish();
-        }
-        let common = self.into_common_data();
 
-        let internal_lib = InternalLib::new(common, libs, func);
+        self.set_user_data(func);
+        self.set_dep_libs(libs);
+
         Ok(RelocatedLibrary {
-            inner: Arc::new((
-                AtomicBool::new(false),
-                super::RelocatedLibraryInner::Internal(internal_lib),
-            )),
+            inner: Arc::new((AtomicBool::new(false), self.into())),
         })
     }
 }

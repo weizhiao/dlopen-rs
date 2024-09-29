@@ -1,50 +1,43 @@
-use core::{ffi::CStr, fmt::Debug, sync::atomic::AtomicBool};
+use super::{
+    arch::Dyn,
+    dso::{dynamic::ELFRawDynamic, SymbolData},
+    ELFLibrary, LibraryExtraData, RelocatedLibraryInner,
+};
+use crate::{find_lib_error, RelocatedLibrary, Result};
+use core::{ffi::c_char, fmt::Debug, mem::MaybeUninit, sync::atomic::AtomicBool};
+use nix::libc::{dlclose, dlinfo, dlopen, RTLD_DI_LINKMAP, RTLD_LOCAL, RTLD_NOW};
 use std::{
     ffi::{c_void, CString},
     sync::Arc,
 };
 
-use nix::libc::{dlclose, dlopen, dlsym, RTLD_LOCAL, RTLD_NOW};
-
-use crate::{find_lib_error, RelocatedLibrary, Result};
-
-use super::{ELFLibrary, RelocatedLibraryInner};
+#[repr(C)]
+struct LinkMap {
+    pub l_addr: *mut c_void,
+    pub l_name: *const c_char,
+    pub l_ld: *mut Dyn,
+    l_next: *mut LinkMap,
+    l_prev: *mut LinkMap,
+}
 
 #[allow(unused)]
-pub(crate) struct ExternalLib {
-    name: CString,
-    handler: *mut c_void,
+pub(crate) struct ExtraData {
+    handle: *mut c_void,
     #[cfg(feature = "debug")]
     debug: super::debug::DebugInfo,
 }
 
-impl Debug for ExternalLib {
+impl Debug for ExtraData {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("ExternalLib")
-            .field("name", &self.name)
-            .field("handler", &self.handler)
+            .field("handler", &self.handle)
             .finish()
     }
 }
 
-impl Drop for ExternalLib {
+impl Drop for ExtraData {
     fn drop(&mut self) {
-        unsafe { dlclose(self.handler) };
-    }
-}
-
-impl ExternalLib {
-    pub(crate) fn get_sym(&self, name: &CStr) -> Option<*const ()> {
-        let sym = unsafe { dlsym(self.handler, name.as_ptr()) };
-        if sym.is_null() {
-            None
-        } else {
-            Some(sym.cast())
-        }
-    }
-
-    pub(crate) fn name(&self) -> &CStr {
-        &self.name
+        unsafe { dlclose(self.handle) };
     }
 }
 
@@ -58,40 +51,75 @@ impl ELFLibrary {
     /// ```
     pub fn sys_load(name: &str) -> Result<RelocatedLibrary> {
         let cstr = CString::new(name).unwrap();
-        let handler = unsafe { dlopen(cstr.as_ptr(), RTLD_NOW | RTLD_LOCAL) };
-        if handler.is_null() {
+        let handle = unsafe { dlopen(cstr.as_ptr(), RTLD_NOW | RTLD_LOCAL) };
+        if handle.is_null() {
             return Err(find_lib_error(format!(
-                "load {} fail",
+                "{}: load fail",
                 cstr.to_str().unwrap()
             )));
         }
+        let link_map = unsafe {
+            let link_map: MaybeUninit<*const LinkMap> = MaybeUninit::uninit();
+            if dlinfo(handle, RTLD_DI_LINKMAP, link_map.as_ptr() as _) != 0 {
+                return Err(find_lib_error(format!(
+                    "{}: get debug info fail",
+                    cstr.to_str().unwrap()
+                )));
+            }
+            &*link_map.assume_init()
+        };
+        let dynamic = ELFRawDynamic::new(link_map.l_ld)?;
+        let base = if dynamic.hash_off() > link_map.l_addr as usize {
+            0
+        } else {
+            link_map.l_addr as usize
+        };
+        let dynamic = dynamic.finish(base);
         #[cfg(feature = "debug")]
         let debug = unsafe {
             use super::debug::*;
-            use core::mem::MaybeUninit;
-            use nix::libc::{dlinfo, RTLD_DI_LINKMAP};
             let debug = {
-                let link_map: MaybeUninit<*const LinkMap> = MaybeUninit::uninit();
-                dlinfo(handler, RTLD_DI_LINKMAP, link_map.as_ptr() as _);
-                let link_map = &*link_map.assume_init();
                 dl_debug_init(
                     link_map.l_addr as usize,
                     link_map.l_name,
                     link_map.l_ld as usize,
                 )
             };
-            dl_debug_finish();
             debug
         };
+        #[cfg(feature = "tls")]
+        let tls_module_id = unsafe {
+            use nix::libc::RTLD_DI_TLS_MODID;
+            let module_id: MaybeUninit<usize> = MaybeUninit::uninit();
+            if dlinfo(handle, RTLD_DI_TLS_MODID, module_id.as_ptr() as _) != 0 {
+                return Err(find_lib_error(format!(
+                    "{}: get tls module id fail",
+                    cstr.to_str().unwrap()
+                )));
+            }
+            let module_id = module_id.assume_init();
+            module_id
+        };
+
         Ok(RelocatedLibrary {
             inner: Arc::new((
                 AtomicBool::new(false),
-                RelocatedLibraryInner::External(ExternalLib {
+                RelocatedLibraryInner {
                     name: cstr,
-                    handler,
-                    #[cfg(feature = "debug")]
-                    debug,
-                }),
+                    tls: Some(tls_module_id),
+                    base: link_map.l_addr as _,
+                    symbols: SymbolData {
+                        hashtab: dynamic.hashtab(),
+                        symtab: dynamic.symtab(),
+                        strtab: dynamic.strtab(),
+                        version: dynamic.version(),
+                    },
+                    extra: LibraryExtraData::External(ExtraData {
+                        handle,
+                        #[cfg(feature = "debug")]
+                        debug,
+                    }),
+                },
             )),
         })
     }

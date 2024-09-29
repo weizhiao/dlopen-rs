@@ -1,34 +1,13 @@
+use super::strtab::ELFStringTable;
 use crate::{loader::arch::ELFSymbol, unlikely};
+use core::ops::Shr;
 
-use super::string_table::ELFStringTable;
-
-#[derive(Debug)]
-pub(crate) enum ELFHashTable {
-    Gnu(ELFGnuHash),
-}
-
-impl ELFHashTable {
-    pub(crate) unsafe fn find(
-        &self,
-        name: &[u8],
-        symtab: *const ELFSymbol,
-        strtab: &ELFStringTable<'static>,
-    ) -> Option<&ELFSymbol> {
-        match self {
-            ELFHashTable::Gnu(hash_table) => hash_table.find(name, symtab, strtab),
-        }
-    }
-
-    pub(crate) fn parse_gnu_hash(ptr: *const u8) -> ELFHashTable {
-        ELFHashTable::Gnu(unsafe { ELFGnuHash::parse(ptr) })
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct ELFGnuHash {
-    //不使用bloom，因此也就不保存bloom的信息
     nbucket: u32,
     table_start_idx: u32,
+    nshift: u32,
+    blooms: &'static [usize],
     buckets: *const u32,
     chains: *const u32,
 }
@@ -70,7 +49,9 @@ impl ELFGnuHash {
         let nbucket: u32 = reader.read();
         let table_start_idx: u32 = reader.read();
         let nbloom: u32 = reader.read();
-        reader.add(4);
+        let nshift: u32 = reader.read();
+        let blooms_ptr = reader.as_ptr() as *const usize;
+        let blooms = core::slice::from_raw_parts(blooms_ptr, nbloom as _);
         let bloom_size = nbloom as usize * core::mem::size_of::<usize>();
         reader.add(bloom_size);
         let buckets = reader.as_ptr() as _;
@@ -78,6 +59,8 @@ impl ELFGnuHash {
         let chains = reader.as_ptr() as _;
         ELFGnuHash {
             nbucket,
+            blooms,
+            nshift,
             table_start_idx,
             buckets,
             chains,
@@ -98,8 +81,18 @@ impl ELFGnuHash {
         name: &[u8],
         symtab: *const ELFSymbol,
         strtab: &ELFStringTable<'static>,
-    ) -> Option<&ELFSymbol> {
+    ) -> Option<(&ELFSymbol, usize)> {
         let hash = ELFGnuHash::gnu_hash(name);
+        let bloom_width: u32 = 8 * size_of::<usize>() as u32;
+        let bloom_idx = (hash / (bloom_width)) as usize % self.blooms.len();
+        let filter = self.blooms[bloom_idx] as u64;
+        if filter & (1 << (hash % bloom_width)) == 0 {
+            return None;
+        }
+        let hash2 = hash.shr(self.nshift);
+        if filter & (1 << (hash2 % bloom_width)) == 0 {
+            return None;
+        }
         let table_start_idx = self.table_start_idx as usize;
         let chain_start_idx = self
             .buckets
@@ -109,6 +102,7 @@ impl ELFGnuHash {
             return None;
         }
 
+        let mut dynsym_idx = chain_start_idx;
         let mut cur_chain = self.chains.add(chain_start_idx - table_start_idx);
         let mut cur_symbol_ptr = symtab.add(chain_start_idx);
         loop {
@@ -117,7 +111,7 @@ impl ELFGnuHash {
                 let cur_symbol = &*cur_symbol_ptr;
                 let sym_name = strtab.get_str(cur_symbol.st_name as usize).unwrap();
                 if sym_name.as_bytes() == name {
-                    return Some(cur_symbol);
+                    return Some((cur_symbol, dynsym_idx));
                 }
             }
             if unlikely(chain_hash & 1 != 0) {
@@ -125,6 +119,7 @@ impl ELFGnuHash {
             }
             cur_chain = cur_chain.add(1);
             cur_symbol_ptr = cur_symbol_ptr.add(1);
+            dynsym_idx += 1;
         }
         None
     }
