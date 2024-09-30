@@ -1,6 +1,6 @@
 [package]
 name = "dlopen-rs"
-version = "0.2.3"
+version = "0.3.0"
 edition = "2021"
 authors = ["wzhao <1207410841@qq.com>"]
 readme = "README.md"
