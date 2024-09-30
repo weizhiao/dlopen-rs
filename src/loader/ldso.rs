@@ -23,8 +23,6 @@ struct LinkMap {
 #[allow(unused)]
 pub(crate) struct ExtraData {
     handle: *mut c_void,
-    #[cfg(feature = "debug")]
-    debug: super::debug::DebugInfo,
 }
 
 impl Debug for ExtraData {
@@ -42,6 +40,23 @@ impl Drop for ExtraData {
 }
 
 impl ELFLibrary {
+    /// Convert a raw handle returned by `dlopen`-family of calls to a `RelocatedLibrary`.
+    ///
+    /// # Safety
+    ///
+    /// The pointer shall be a result of a successful call of the `dlopen`-family of functions. It must be valid to call `dlclose`
+    /// with this pointer as an argument.
+    pub unsafe fn sys_load_from_raw(handle: *mut c_void, name: &str) -> Result<RelocatedLibrary> {
+        let cstr = CString::new(name).unwrap();
+        if handle.is_null() {
+            return Err(find_lib_error(format!(
+                "{}: load fail",
+                cstr.to_str().unwrap()
+            )));
+        }
+        Self::sys_load_impl(handle, cstr)
+    }
+
     ///Use the system dynamic linker (ld.so) to load the dynamic library, allowing it to be used in the same way as dlopen.
     /// # Examples
     ///
@@ -58,6 +73,10 @@ impl ELFLibrary {
                 cstr.to_str().unwrap()
             )));
         }
+        Self::sys_load_impl(handle, cstr)
+    }
+
+    fn sys_load_impl(handle: *mut c_void, cstr: CString) -> Result<RelocatedLibrary> {
         let link_map = unsafe {
             let link_map: MaybeUninit<*const LinkMap> = MaybeUninit::uninit();
             if dlinfo(handle, RTLD_DI_LINKMAP, link_map.as_ptr() as _) != 0 {
@@ -75,6 +94,18 @@ impl ELFLibrary {
             link_map.l_addr as usize
         };
         let dynamic = dynamic.finish(base);
+        #[cfg(feature = "version")]
+        let version = dynamic.version_idx().map(|version_idx| {
+            super::dso::version::ELFVersion::new(
+                version_idx + base,
+                dynamic
+                    .verneed()
+                    .map(|(off, num)| (off + link_map.l_addr as usize, num)),
+                dynamic
+                    .verdef()
+                    .map(|(off, num)| (off + link_map.l_addr as usize, num)),
+            )
+        });
         #[cfg(feature = "debug")]
         let debug = unsafe {
             use super::debug::*;
@@ -106,19 +137,19 @@ impl ELFLibrary {
                 AtomicBool::new(false),
                 RelocatedLibraryInner {
                     name: cstr,
+                    #[cfg(feature = "debug")]
+                    link_map: debug,
+                    #[cfg(feature = "tls")]
                     tls: Some(tls_module_id),
                     base: link_map.l_addr as _,
                     symbols: SymbolData {
                         hashtab: dynamic.hashtab(),
                         symtab: dynamic.symtab(),
                         strtab: dynamic.strtab(),
-                        version: dynamic.version(),
+                        #[cfg(feature = "version")]
+                        version,
                     },
-                    extra: LibraryExtraData::External(ExtraData {
-                        handle,
-                        #[cfg(feature = "debug")]
-                        debug,
-                    }),
+                    extra: LibraryExtraData::External(ExtraData { handle }),
                 },
             )),
         })

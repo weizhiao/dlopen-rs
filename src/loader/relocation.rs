@@ -15,6 +15,7 @@ use elf::abi::*;
 struct SymDef<'temp> {
     sym: &'temp ELFSymbol,
     base: usize,
+    #[cfg(feature = "tls")]
     tls: Option<usize>,
 }
 
@@ -136,7 +137,7 @@ impl ELFLibrary {
 
         let write_val = |addr: usize, symbol: usize| {
             unsafe {
-                let rel_addr = (self.common_data().base() + addr) as *mut usize;
+                let rel_addr = (self.extra_data().base() + addr) as *mut usize;
                 rel_addr.write(symbol)
             };
         };
@@ -151,7 +152,18 @@ impl ELFLibrary {
                     }
                     None
                 })
-                .or_else(|| symdef.map(|symdef| (symdef.base + symdef.sym.st_value as usize) as _))
+                .or_else(|| {
+                    symdef.map(|symdef| {
+                        if symdef.sym.st_info & 0xf != STT_GNU_IFUNC {
+                            (symdef.base + symdef.sym.st_value as usize) as _
+                        } else {
+                            let ifunc: fn() -> usize = unsafe {
+                                core::mem::transmute(symdef.base + symdef.sym.st_value as usize)
+                            };
+                            ifunc() as _
+                        }
+                    })
+                })
                 .ok_or(relocate_error(format!(
                     "{}: can not find symbol {} in dependency libraries",
                     self.name(),
@@ -164,21 +176,23 @@ impl ELFLibrary {
             let r_sym = rela.r_info as usize >> REL_BIT;
             let mut str_name = None;
             let symdef = if r_sym != 0 {
-                let (dynsym, temp_str_name, version) = self.symbols().rel_symbol(r_sym);
-                str_name = Some(temp_str_name);
+                let (dynsym, syminfo) = self.symbols().rel_symbol(r_sym);
+                str_name = Some(syminfo.name);
                 if dynsym.st_shndx != SHN_UNDEF {
                     Some(SymDef {
                         sym: dynsym,
-                        base: self.common_data().base(),
-                        tls: self.common_data().tls().map(|tls| tls as usize),
+                        base: self.extra_data().base(),
+                        #[cfg(feature = "tls")]
+                        tls: self.extra_data().tls().map(|tls| tls as usize),
                     })
                 } else {
                     let mut symbol = None;
                     for lib in libs.iter() {
-                        if let Some((sym, sym_idx)) = lib.inner().get_sym(temp_str_name, &version) {
+                        if let Some(sym) = lib.inner().symbols().get_sym(&syminfo) {
                             symbol = Some(SymDef {
                                 sym,
                                 base: lib.base(),
+                                #[cfg(feature = "tls")]
                                 tls: lib.inner().tls(),
                             });
                             break;
@@ -211,7 +225,7 @@ impl ELFLibrary {
                 REL_RELATIVE => {
                     write_val(
                         rela.r_offset as usize,
-                        self.common_data().base() + rela.r_addend as usize,
+                        self.extra_data().base() + rela.r_addend as usize,
                     );
                 }
                 // ELFTLS
@@ -227,7 +241,7 @@ impl ELFLibrary {
                     } else {
                         write_val(
                             rela.r_offset as usize,
-                            self.common_data().tls().unwrap() as usize,
+                            self.extra_data().tls().unwrap() as usize,
                         );
                     }
                 }
@@ -261,20 +275,16 @@ impl ELFLibrary {
         if let Some(init) = self.init_fn() {
             init();
         }
-
         if let Some(init_array) = self.init_array_fn() {
             for init in *init_array {
                 init();
             }
         }
-
-        if let Some(relro) = &self.relro() {
+        if let Some(relro) = self.relro() {
             relro.relro()?;
         }
-
         self.set_user_data(func);
         self.set_dep_libs(libs);
-
         Ok(RelocatedLibrary {
             inner: Arc::new((AtomicBool::new(false), self.into())),
         })

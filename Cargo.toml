@@ -17,7 +17,6 @@ resolver = "2"
 
 [dev-dependencies]
 libloading = "0.8.0"
-criterion = { version = "0.5.1", features = ["html_reports"] }
 
 [dependencies.spin]
 version = "0.9.8"
@@ -73,6 +72,8 @@ std = ["dep:nix"]
 mmap = ["dep:nix", "std"]
 # enable this when you need to use thread local storage
 tls = ["std", "dep:nix"]
+# activate specific versions of symbols for dynamic library loading
+version = []
 # enable this can make loading `faster`, but you'll need to use the `nightly` compiler
 nightly = []
 # enable this when you want to use the exception handling mechanism provided by dlopen-rs

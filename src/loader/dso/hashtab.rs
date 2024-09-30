@@ -1,15 +1,11 @@
-use super::strtab::ELFStringTable;
-use crate::{loader::arch::ELFSymbol, unlikely};
-use core::ops::Shr;
-
 #[derive(Debug, Clone)]
 pub(crate) struct ELFGnuHash {
-    nbucket: u32,
-    table_start_idx: u32,
-    nshift: u32,
-    blooms: &'static [usize],
-    buckets: *const u32,
-    chains: *const u32,
+    pub nbucket: u32,
+    pub table_start_idx: u32,
+    pub nshift: u32,
+    pub blooms: &'static [usize],
+    pub buckets: *const u32,
+    pub chains: *const u32,
 }
 
 impl ELFGnuHash {
@@ -68,59 +64,11 @@ impl ELFGnuHash {
     }
 
     #[inline]
-    fn gnu_hash(name: &[u8]) -> u32 {
+    pub(crate) fn gnu_hash(name: &[u8]) -> u32 {
         let mut hash = 5381u32;
         for byte in name {
             hash = hash.wrapping_mul(33).wrapping_add(u32::from(*byte));
         }
         hash
-    }
-
-    pub(crate) unsafe fn find(
-        &self,
-        name: &[u8],
-        symtab: *const ELFSymbol,
-        strtab: &ELFStringTable<'static>,
-    ) -> Option<(&ELFSymbol, usize)> {
-        let hash = ELFGnuHash::gnu_hash(name);
-        let bloom_width: u32 = 8 * size_of::<usize>() as u32;
-        let bloom_idx = (hash / (bloom_width)) as usize % self.blooms.len();
-        let filter = self.blooms[bloom_idx] as u64;
-        if filter & (1 << (hash % bloom_width)) == 0 {
-            return None;
-        }
-        let hash2 = hash.shr(self.nshift);
-        if filter & (1 << (hash2 % bloom_width)) == 0 {
-            return None;
-        }
-        let table_start_idx = self.table_start_idx as usize;
-        let chain_start_idx = self
-            .buckets
-            .add((hash as usize) % self.nbucket as usize)
-            .read() as usize;
-        if unlikely(chain_start_idx == 0) {
-            return None;
-        }
-
-        let mut dynsym_idx = chain_start_idx;
-        let mut cur_chain = self.chains.add(chain_start_idx - table_start_idx);
-        let mut cur_symbol_ptr = symtab.add(chain_start_idx);
-        loop {
-            let chain_hash = cur_chain.read();
-            if hash | 1 == chain_hash | 1 {
-                let cur_symbol = &*cur_symbol_ptr;
-                let sym_name = strtab.get_str(cur_symbol.st_name as usize).unwrap();
-                if sym_name.as_bytes() == name {
-                    return Some((cur_symbol, dynsym_idx));
-                }
-            }
-            if unlikely(chain_hash & 1 != 0) {
-                break;
-            }
-            cur_chain = cur_chain.add(1);
-            cur_symbol_ptr = cur_symbol_ptr.add(1);
-            dynsym_idx += 1;
-        }
-        None
     }
 }

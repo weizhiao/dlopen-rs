@@ -1,13 +1,11 @@
-use core::{slice::from_raw_parts, usize};
-
+use super::{hashtab::ELFGnuHash, ELFStringTable};
 use crate::{
     loader::arch::{Dyn, ELFSymbol, Rela},
     parse_dynamic_error, Result,
 };
 use alloc::vec::Vec;
+use core::{slice::from_raw_parts, usize};
 use elf::abi::*;
-
-use super::{hashtab::ELFGnuHash, strtab::ELFStringTable, version::ELFVersion};
 
 pub(crate) struct ELFRawDynamic {
     #[cfg(feature = "debug")]
@@ -29,6 +27,8 @@ pub(crate) struct ELFRawDynamic {
     version_ids_off: Option<usize>,
     verneed_off: Option<usize>,
     verneed_num: Option<usize>,
+    verdef_off: Option<usize>,
+    verdef_num: Option<usize>,
     needed_libs: Vec<usize>,
 }
 
@@ -51,6 +51,8 @@ impl ELFRawDynamic {
         let mut version_ids_off = None;
         let mut verneed_off = None;
         let mut verneed_num = None;
+        let mut verdef_off = None;
+        let mut verdef_num = None;
         let mut needed_libs = Vec::new();
 
         let mut cur_dyn_ptr = dynamic_ptr;
@@ -76,6 +78,8 @@ impl ELFRawDynamic {
                 DT_VERSYM => version_ids_off = Some(dynamic.d_un as usize),
                 DT_VERNEED => verneed_off = Some(dynamic.d_un as usize),
                 DT_VERNEEDNUM => verneed_num = Some(dynamic.d_un as usize),
+                DT_VERDEF => verdef_off = Some(dynamic.d_un as usize),
+                DT_VERDEFNUM => verdef_num = Some(dynamic.d_un as usize),
                 DT_NULL => break,
                 _ => {}
             }
@@ -86,19 +90,15 @@ impl ELFRawDynamic {
         let hash_off = hash_off.ok_or(parse_dynamic_error(
             "dynamic section does not have DT_GNU_HASH",
         ))?;
-
         let symtab_off = symtab_off.ok_or(parse_dynamic_error(
             "dynamic section does not have DT_SYMTAB",
         ))?;
-
         let strtab_off = strtab_off.ok_or(parse_dynamic_error(
             "dynamic section does not have DT_STRTAB",
         ))?;
-
         let strtab_size = strtab_size.ok_or(parse_dynamic_error(
             "dynamic section does not have DT_STRSZ",
         ))?;
-
         Ok(ELFRawDynamic {
             #[cfg(feature = "debug")]
             dyn_addr: dynamic_ptr as usize,
@@ -120,6 +120,8 @@ impl ELFRawDynamic {
             version_ids_off,
             verneed_off,
             verneed_num,
+            verdef_off,
+            verdef_num,
         })
     }
 
@@ -158,15 +160,14 @@ impl ELFRawDynamic {
         let needed_libs: Vec<&'static str> = self
             .needed_libs
             .iter()
-            .map(|needed_lib| strtab.get_str(*needed_lib).unwrap())
+            .map(|needed_lib| strtab.get(*needed_lib))
             .collect();
-        let version = self.version_ids_off.map(|version_ids_off| {
-            ELFVersion::new(
-                (version_ids_off + base) as _,
-                self.verneed_off
-                    .map(|verneed_off| ((verneed_off + base) as _, self.verneed_num.unwrap())),
-            )
-        });
+        let verneed = self
+            .verneed_off
+            .map(|verneed_off| (verneed_off, self.verneed_num.unwrap()));
+        let verdef = self
+            .verdef_off
+            .map(|verdef_off| (verdef_off, self.verdef_num.unwrap()));
         ELFDynamic {
             #[cfg(feature = "debug")]
             dyn_addr: self.dyn_addr,
@@ -180,15 +181,19 @@ impl ELFRawDynamic {
             pltrel,
             rela,
             needed_libs,
-            version,
+            version_idx: self.version_ids_off,
+            verneed,
+            verdef,
         }
     }
 
+    #[cfg(feature = "ldso")]
     pub(crate) fn hash_off(&self) -> usize {
         self.hash_off
     }
 }
 
+#[allow(unused)]
 pub(crate) struct ELFDynamic {
     #[cfg(feature = "debug")]
     dyn_addr: usize,
@@ -202,7 +207,9 @@ pub(crate) struct ELFDynamic {
     pltrel: Option<&'static [Rela]>,
     rela: Option<&'static [Rela]>,
     needed_libs: Vec<&'static str>,
-    version: Option<ELFVersion>,
+    version_idx: Option<usize>,
+    verneed: Option<(usize, usize)>,
+    verdef: Option<(usize, usize)>,
 }
 
 impl ELFDynamic {
@@ -247,8 +254,19 @@ impl ELFDynamic {
         self.fini_array_fn
     }
 
-    pub(crate) fn version(&self) -> Option<ELFVersion> {
-        self.version.clone()
+    #[cfg(feature = "version")]
+    pub(crate) fn version_idx(&self) -> Option<usize> {
+        self.version_idx
+    }
+
+    #[cfg(feature = "version")]
+    pub(crate) fn verneed(&self) -> Option<(usize, usize)> {
+        self.verneed
+    }
+
+    #[cfg(feature = "version")]
+    pub(crate) fn verdef(&self) -> Option<(usize, usize)> {
+        self.verdef
     }
 
     pub(crate) fn needed_libs(self) -> Vec<&'static str> {

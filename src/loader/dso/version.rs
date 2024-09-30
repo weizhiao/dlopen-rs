@@ -12,6 +12,8 @@ use elf::abi;
 /// optionally followed by an array of VerDefAux structures.
 #[repr(C)]
 struct VerDef {
+    /// Version revision. This field shall be set to 1.
+    vd_version: u16,
     /// Version information flag bitmask.
     vd_flags: u16,
     /// VersionIndex value referencing the SHT_GNU_VERSYM section.
@@ -81,18 +83,6 @@ struct VersionIndex(u16);
 impl VersionIndex {
     fn index(&self) -> u16 {
         self.0 & abi::VER_NDX_VERSION
-    }
-
-    fn is_local(&self) -> bool {
-        self.index() == abi::VER_NDX_LOCAL
-    }
-
-    fn is_global(&self) -> bool {
-        self.index() == abi::VER_NDX_GLOBAL
-    }
-
-    fn is_hidden(&self) -> bool {
-        (self.0 & abi::VER_NDX_HIDDEN) != 0
     }
 }
 
@@ -173,6 +163,7 @@ impl IntoIterator for &VerNeedTable {
     }
 }
 
+#[derive(Debug, Clone)]
 struct VerDefTable {
     ptr: *const VerDef,
     num: usize,
@@ -188,6 +179,21 @@ struct VerDefAuxIterator {
     ptr: *const VerDefAux,
     count: usize,
     num: usize,
+}
+
+impl Iterator for VerDefAuxIterator {
+    type Item = VerDefAux;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.count < self.num {
+            let verdef_aux = unsafe { self.ptr.read() };
+            self.ptr = unsafe { self.ptr.add(1) };
+            self.count += 1;
+            Some(verdef_aux)
+        } else {
+            None
+        }
+    }
 }
 
 impl Iterator for VerDefIterator {
@@ -227,98 +233,111 @@ impl IntoIterator for &VerDefTable {
 pub(crate) struct ELFVersion {
     version_ids: VersionIndexTable,
     verneeds: Option<VerNeedTable>,
+    verdefs: Option<VerDefTable>,
 }
 
 impl ELFVersion {
     pub(crate) fn new(
-        version_ids_ptr: *const u8,
-        verneeds: Option<(*const u8, usize)>,
+        version_ids_off: usize,
+        verneeds: Option<(usize, usize)>,
+        verdefs: Option<(usize, usize)>,
     ) -> ELFVersion {
         ELFVersion {
             version_ids: VersionIndexTable {
-                ptr: version_ids_ptr as _,
+                ptr: version_ids_off as _,
             },
-            verneeds: verneeds.map(|(ptr, num)| VerNeedTable { ptr: ptr as _, num }),
+            verneeds: verneeds.map(|(off, num)| VerNeedTable { ptr: off as _, num }),
+            verdefs: verdefs.map(|(off, num)| VerDefTable { ptr: off as _, num }),
         }
     }
 }
 
 #[derive(Debug)]
-pub(crate) struct SymbolRequireVersion {
-    pub file: &'static str,
-    pub name: &'static str,
+pub(crate) struct SymbolVersion<'a> {
+    pub name: &'a str,
     pub hash: u32,
-    pub flags: u16,
-    pub hidden: bool,
 }
 
-impl SymbolData {
-    pub(crate) fn get_requirement(&self, sym_idx: usize) -> Option<SymbolRequireVersion> {
-        if let Some(version) = &self.version {
-            let ver_ndx = version.version_ids.get(sym_idx);
-            if let Some(verneeds) = &version.verneeds {
-                for (verneed, vna_iter) in verneeds {
-                    for vna in vna_iter {
-                        if vna.vna_other != ver_ndx.index() {
-                            continue;
-                        }
+impl<'a> SymbolVersion<'a> {
+    /// glibc:_dl_elf_hash
+    fn dl_elf_hash(name: &str) -> u32 {
+        let bytes = name.as_bytes();
+        let mut hash: u32 = bytes[0] as u32;
 
-                        let file = self.strtab.get_str(verneed.vn_file as usize).unwrap();
-                        let name = self.strtab.get_str(vna.vna_name as usize).unwrap();
-                        let hash = vna.vna_hash;
-                        let hidden = ver_ndx.is_hidden();
-                        return Some(SymbolRequireVersion {
-                            file,
-                            name,
-                            hash,
-                            flags: vna.vna_flags,
-                            hidden,
-                        });
+        if hash != 0 && bytes.len() > 1 {
+            hash = (hash << 4) + bytes[1] as u32;
+            if bytes.len() > 2 {
+                hash = (hash << 4) + bytes[2] as u32;
+                if bytes.len() > 3 {
+                    hash = (hash << 4) + bytes[3] as u32;
+                    if bytes.len() > 4 {
+                        hash = (hash << 4) + bytes[4] as u32;
+                        let mut name = &bytes[5..];
+                        while let Some(&byte) = name.first() {
+                            hash = (hash << 4) + byte as u32;
+                            let hi = hash & 0xf0000000;
+                            hash ^= hi >> 24;
+                            name = &name[1..];
+                        }
+                        hash &= 0x0fffffff;
                     }
                 }
             }
         }
+        hash
+    }
 
-        // Maybe we should treat this as a ParseError instead of returning an
-        // empty Option? This can only happen if .gnu.versions[N] contains an
-        // index that doesn't exist, which is likely a file corruption or
-        // programmer error (i.e asking for a requirement for a defined symbol)
+    pub(crate) fn new(name: &'a str) -> Self {
+        let hash = Self::dl_elf_hash(name);
+        SymbolVersion { name, hash }
+    }
+}
+
+impl SymbolData {
+    pub(crate) fn get_requirement(&self, sym_idx: usize) -> Option<SymbolVersion> {
+        if let Some(version) = &self.version {
+            let ver_ndx = version.version_ids.get(sym_idx);
+            if ver_ndx.index() <= 1 {
+                return None;
+            }
+            if let Some(verneeds) = &version.verneeds {
+                for (_, vna_iter) in verneeds {
+                    for vna in vna_iter {
+                        if vna.vna_other != ver_ndx.index() {
+                            continue;
+                        }
+                        let name = self.strtab.get(vna.vna_name as usize);
+                        let hash = vna.vna_hash;
+                        return Some(SymbolVersion { name, hash });
+                    }
+                }
+            }
+        }
         None
     }
 
-    // pub(crate) fn get_definition(&self, sym_idx: usize) -> Option<SymbolDefinition<'_, E>> {
-    //     let (ref verdefs, ref verdef_strs) = match self.verdefs {
-    //         Some(ref verdefs) => verdefs,
-    //         None => {
-    //             return Ok(None);
-    //         }
-    //     };
-
-    //     let ver_ndx = self.version_ids.get(sym_idx);
-    //     let iter = *verdefs;
-    //     for (vd, vda_iter) in iter {
-    //         if vd.vd_ndx != ver_ndx.index() {
-    //             continue;
-    //         }
-
-    //         let flags = vd.vd_flags;
-    //         let hash = vd.vd_hash;
-    //         let hidden = ver_ndx.is_hidden();
-    //         return Ok(Some(SymbolDefinition {
-    //             hash,
-    //             flags,
-    //             names: SymbolNamesIterator {
-    //                 vda_iter,
-    //                 strtab: verdef_strs,
-    //             },
-    //             hidden,
-    //         }));
-    //     }
-
-    //     // Maybe we should treat this as a ParseError instead of returning an
-    //     // empty Option? This can only happen if .gnu.versions[N] contains an
-    //     // index that doesn't exist, which is likely a file corruption or
-    //     // programmer error (i.e asking for a definition for an undefined symbol)
-    //     Ok(None)
-    // }
+    pub(crate) fn check_match(&self, sym_idx: usize, version: &Option<SymbolVersion>) -> bool {
+        if let Some(version) = version {
+            let def_version = self.version.as_ref().unwrap();
+            let verdefs = def_version.verdefs.as_ref().unwrap();
+            let ver_ndx = def_version.version_ids.get(sym_idx);
+            for (vd, vda_iter) in verdefs {
+                if vd.vd_ndx != ver_ndx.index() {
+                    continue;
+                }
+                let hash = vd.vd_hash;
+                if hash == version.hash
+                    && vda_iter
+                        .into_iter()
+                        .any(|vda| self.strtab.get(vda.vda_name as usize) == version.name)
+                {
+                    return true;
+                }
+                return false;
+            }
+            false
+        } else {
+            true
+        }
+    }
 }

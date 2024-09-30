@@ -1,6 +1,11 @@
-//!dlopen-rs supports loading dynamic libraries from both memory and files, and is compatible with the `no_std` environment.
-//!This gives you greater flexibility in loading and managing dynamic libraries, offering a viable option for using them in no_std contexts.
-//!Additionally, it integrates seamlessly with the system’s dynamic linker in std environments.
+//!A versatile Rust library designed for loading ELF dynamic libraries from memory or from files.
+//!
+//!This library serves three purposes:
+//!1. Provide a pure Rust alternative to musl ld.so or glibc ld.so.
+//!2. Provide loading ELF dynamic libraries support for `#![no_std]` targets.
+//!3. Easily swap out symbols in shared libraries with your own custom symbols at runtime
+//!
+//!Additional, it integrates seamlessly with the system’s dynamic linker in `std` environments when the `ldso` feature is enabled.
 //!Currently, it supports `x86_64`, `x86`, `RV64`, and `AArch64` architectures.
 //!
 //! # Examples

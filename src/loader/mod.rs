@@ -15,9 +15,8 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-use alloc::{ffi::CString, format, sync::Arc};
-use arch::ELFSymbol;
-use dso::{version::SymbolRequireVersion, ExtraData, SymbolData};
+use alloc::{ffi::CString, format, sync::Arc, vec::Vec};
+use dso::{ExtraData, SymbolData, SymbolInfo};
 
 use crate::{find_symbol_error, Result};
 pub use dso::ELFLibrary;
@@ -31,6 +30,7 @@ enum LibraryExtraData {
 
 impl Drop for LibraryExtraData {
     fn drop(&mut self) {
+        #[allow(irrefutable_let_patterns)]
         if let LibraryExtraData::Internal(extra) = self {
             if let Some(fini) = extra.fini_fn() {
                 fini();
@@ -49,7 +49,10 @@ pub(crate) struct RelocatedLibraryInner {
     name: CString,
     base: usize,
     symbols: SymbolData,
+    #[cfg(feature = "tls")]
     tls: Option<usize>,
+    #[cfg(feature = "debug")]
+    link_map: debug::DebugInfo,
     extra: LibraryExtraData,
 }
 
@@ -60,14 +63,12 @@ impl Debug for RelocatedLibraryInner {
 }
 
 impl RelocatedLibraryInner {
-    pub(crate) fn get_sym(
-        &self,
-        name: &str,
-        version: &Option<SymbolRequireVersion>,
-    ) -> Option<(&ELFSymbol, usize)> {
-        self.symbols.get_sym(name, version)
+    #[inline]
+    pub(crate) fn symbols(&self) -> &SymbolData {
+        &self.symbols
     }
 
+    #[cfg(feature = "tls")]
     pub(crate) fn tls(&self) -> Option<usize> {
         self.tls
     }
@@ -86,6 +87,7 @@ impl RelocatedLibrary {
     pub fn dep_libs(&self) -> Option<&Vec<RelocatedLibrary>> {
         match &self.inner().extra {
             LibraryExtraData::Internal(extra_data) => extra_data.get_dep_libs(),
+            #[cfg(feature = "ldso")]
             LibraryExtraData::External(_) => None,
         }
     }
@@ -166,8 +168,53 @@ impl RelocatedLibrary {
         self.inner
             .as_ref()
             .1
-            .get_sym(name, &None)
-            .map(|(sym, _)| Symbol {
+            .symbols()
+            .get_sym(&SymbolInfo::new(name))
+            .map(|sym| Symbol {
+                ptr: (self.base() + sym.st_value as usize) as _,
+                pd: PhantomData,
+            })
+            .ok_or(find_symbol_error(format!("can not find symbol:{}", name)))
+    }
+
+    /// Attempts to load a versioned symbol from the dynamically-linked library.
+    ///
+    /// # Safety
+    /// This function is unsafe because it involves raw pointer manipulation and
+    /// dereferencing. The caller must ensure that the library handle is valid
+    /// and that the symbol exists and has the correct type.
+    ///
+    /// # Parameters
+    /// - `&'lib self`: A reference to the library instance from which the symbol will be loaded.
+    /// - `name`: The name of the symbol to load.
+    /// - `version`: The version of the symbol to load.
+    ///
+    /// # Returns
+    /// If the symbol is found and has the correct type, this function returns
+    /// `Ok(Symbol<'lib, T>)`, where `Symbol` is a wrapper around a raw function pointer.
+    /// If the symbol cannot be found or an error occurs, it returns an `Err` with a message.
+    ///
+    /// # Examples
+    /// ```
+    /// let symbol = unsafe { lib.get_version::<fn()>>("function_name", "1.0").unwrap() };
+    /// ```
+    ///
+    /// # Errors
+    /// Returns a custom error if the symbol cannot be found, or if there is a problem
+    /// retrieving the symbol.
+    #[cfg(feature = "version")]
+    pub unsafe fn get_version<'lib, T>(
+        &'lib self,
+        name: &str,
+        version: &str,
+    ) -> Result<Symbol<'lib, T>> {
+        let version = dso::version::SymbolVersion::new(version);
+        self.inner
+            .as_ref()
+            .1
+            .symbols()
+            .get_sym(&SymbolInfo::new_with_version(name, version))
+            .map(|sym| Symbol {
                 ptr: (self.base() + sym.st_value as usize) as _,
                 pd: PhantomData,
             })

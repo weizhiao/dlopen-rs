@@ -3,16 +3,23 @@
 [![license](https://img.shields.io/crates/l/dlopen-rs.svg)](https://crates.io/crates/dlopen-rs)
 # dlopen-rs
 
-dlopen-rs supports loading dynamic libraries from both memory and files, and is compatible with the `no_std` environment. This gives you greater flexibility in loading and managing dynamic libraries, offering a viable option for using them in no_std contexts. Additionally, it integrates seamlessly with the system’s dynamic linker in std environments.   
-Currently, it supports `x86_64`, `x86`, `RV64`, and `AArch64` architectures.
+A versatile Rust library designed for loading ELF dynamic libraries from memory or from files. 
+
+This library serves three purposes:
+1. Provide a pure Rust alternative to musl ld.so or glibc ld.so.
+2. Provide loading ELF dynamic libraries support for `#![no_std]` targets.
+3. Easily swap out symbols in shared libraries with your own custom symbols at runtime
+
+Additional, it integrates seamlessly with the system’s dynamic linker in `std` environments when the `ldso` feature is enabled. Currently, it supports `x86_64`, `x86`, `RV64`, and `AArch64` architectures.
 
 ## Feature
 | Feature   | Default | Description                                                                                                                                           |
 | --------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ldso      | Yes     | Allows dynamic libraries to be loaded using system dynamic loaders (ldso).                                                                            |
+| ldso      | Yes     | Allows dynamic libraries to be loaded using system dynamic loaders (ld.so).                                                                           |
 | std       | Yes     | Enable `std`                                                                                                                                          |
 | debug     | Yes     | Enable this to use gdb/lldb for debugging loaded dynamic libraries. Note that only dynamic libraries loaded using dlopen-rs can be debugged with gdb. |
 | mmap      | Yes     | Enable this on platforms that support `mmap`                                                                                                          |
+| version   | No      | Activate specific versions of symbols for dynamic library loading                                                                                     |
 | tls       | Yes     | Enable this to use thread local storage.                                                                                                              |
 | nightly   | No      | Enable this for faster loading, but you’ll need to use the nightly compiler.                                                                          |
 | unwinding | No      | Enable this to use the exception handling mechanism provided by dlopen-rs.                                                                            |
@@ -61,4 +68,5 @@ fn main() {
 }
 ```
 ## NOTE
-If you encounter any issues while using it or need any new features, feel free to raise an issue on GitHub.
+If you encounter any issues while using it or need any new features, feel free to raise an issue on GitHub. 
+https://github.com/weizhiao/dlopen-rs
