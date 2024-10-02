@@ -3,10 +3,12 @@
 [![license](https://img.shields.io/crates/l/dlopen-rs.svg)](https://crates.io/crates/dlopen-rs)
 # dlopen-rs
 
-A versatile Rust library designed for loading ELF dynamic libraries from memory or from files. 
+English | [中文](README-zh_cn.md)
+
+A pure-rust library designed for loading ELF dynamic libraries from memory or from files. 
 
 This library serves three purposes:
-1. Provide a pure Rust alternative to musl ld.so or glibc ld.so.
+1. Provide a pure Rust alternative to musl/glibc ld.so.
 2. Provide loading ELF dynamic libraries support for `#![no_std]` targets.
 3. Easily swap out symbols in shared libraries with your own custom symbols at runtime
 
