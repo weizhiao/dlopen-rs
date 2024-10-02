@@ -27,7 +27,7 @@ pub(crate) struct ExtraData {
 
 impl Debug for ExtraData {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("ExternalLib")
+        f.debug_struct("ExtraData")
             .field("handler", &self.handle)
             .finish()
     }

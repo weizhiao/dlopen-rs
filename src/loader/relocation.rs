@@ -174,10 +174,10 @@ impl ELFLibrary {
         for rela in iter {
             let r_type = rela.r_info as usize & REL_MASK;
             let r_sym = rela.r_info as usize >> REL_BIT;
-            let mut str_name = None;
+            let mut name = "";
             let symdef = if r_sym != 0 {
                 let (dynsym, syminfo) = self.symbols().rel_symbol(r_sym);
-                str_name = Some(syminfo.name);
+                name = syminfo.name;
                 if dynsym.st_shndx != SHN_UNDEF {
                     Some(SymDef {
                         sym: dynsym,
@@ -215,7 +215,7 @@ impl ELFLibrary {
                 REL_NONE => {}
                 // REL_GOT/REL_JUMP_SLOT: S  REL_SYMBOLIC: S + A
                 REL_JUMP_SLOT | REL_GOT | REL_SYMBOLIC => {
-                    let symbol = find_symbol(str_name.unwrap(), symdef)?;
+                    let symbol = find_symbol(name, symdef)?;
                     write_val(
                         rela.r_offset as usize,
                         symbol as usize + rela.r_addend as usize,
@@ -235,7 +235,7 @@ impl ELFLibrary {
                         let symdef = symdef.ok_or(relocate_error(format!(
                             "{}: can not relocate symbol {}",
                             self.name(),
-                            str_name.unwrap()
+                            name
                         )))?;
                         write_val(rela.r_offset as usize, symdef.tls.unwrap());
                     } else {
@@ -250,7 +250,7 @@ impl ELFLibrary {
                     let symdef = symdef.ok_or(relocate_error(format!(
                         "{}: can not relocate symbol {}",
                         self.name(),
-                        str_name.unwrap()
+                        name
                     )))?;
                     // offset in tls
                     let tls_val = (symdef.sym.st_value as usize + rela.r_addend as usize)

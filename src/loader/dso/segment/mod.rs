@@ -20,7 +20,6 @@ pub(crate) const MASK: usize = !(PAGE_SIZE - 1);
 pub(crate) const ALIGN: usize = 8;
 
 #[allow(unused)]
-#[derive(Debug)]
 pub(crate) struct ELFRelro {
     addr: usize,
     len: usize,

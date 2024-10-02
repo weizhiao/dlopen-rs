@@ -16,7 +16,7 @@ impl RelocatedLibrary {
     pub fn register(&self) -> Option<RelocatedLibrary> {
         let mut writer = REGISTER_LIBS.write().unwrap();
         self.set_register();
-        writer.insert(self.name().to_owned(), self.clone())
+        writer.insert(self.cname().to_owned(), self.clone())
     }
 }
 
@@ -25,7 +25,7 @@ impl Drop for RelocatedLibrary {
         if self.is_register() {
             if Arc::strong_count(&self.inner) == 2 {
                 let mut writer = REGISTER_LIBS.write().unwrap();
-                let remove = writer.remove(self.name());
+                let remove = writer.remove(self.cname());
                 //防止死锁
                 drop(writer);
                 drop(remove);
@@ -47,15 +47,19 @@ pub(crate) unsafe extern "C" fn dl_iterate_phdr_impl(
     use nix::libc::dl_phdr_info;
     let reader = REGISTER_LIBS.read().unwrap();
     let mut ret = nix::libc::dl_iterate_phdr(callback, data);
-    for lib in reader.values().filter(|lib| lib.get_extra_data().is_some()) {
-        let extra = lib.get_extra_data().unwrap();
+    for lib in reader.values() {
+        let extra = if let Some(extra) = lib.get_extra_data() {
+            extra
+        } else {
+            continue;
+        };
         let (dlpi_phdr, dlpi_phnum) = extra
             .phdrs()
             .map(|phdrs| (phdrs.as_ptr().cast(), phdrs.len() as _))
             .unwrap_or((ptr::null(), 0));
         let mut info = dl_phdr_info {
             dlpi_addr: lib.base() as _,
-            dlpi_name: lib.name().as_ptr().cast(),
+            dlpi_name: lib.cname().as_ptr().cast(),
             dlpi_phdr,
             dlpi_phnum,
             dlpi_adds: reader.len() as _,

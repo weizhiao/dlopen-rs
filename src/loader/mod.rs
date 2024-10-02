@@ -22,6 +22,7 @@ use crate::{find_symbol_error, Result};
 pub use dso::ELFLibrary;
 
 #[allow(unused)]
+#[derive(Debug)]
 enum LibraryExtraData {
     Internal(ExtraData),
     #[cfg(feature = "ldso")]
@@ -58,7 +59,11 @@ pub(crate) struct RelocatedLibraryInner {
 
 impl Debug for RelocatedLibraryInner {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("RelocatedLibraryInner").finish()
+        f.debug_struct("RelocatedLibrary")
+            .field("name", &self.name)
+            .field("base", &self.base)
+            .field("extra", &self.extra)
+            .finish()
     }
 }
 
@@ -74,16 +79,37 @@ impl RelocatedLibraryInner {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct RelocatedLibrary {
     pub(crate) inner: Arc<(AtomicBool, RelocatedLibraryInner)>,
+}
+
+impl Debug for RelocatedLibrary {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        self.inner().fmt(f)
+    }
 }
 
 unsafe impl Send for RelocatedLibrary {}
 unsafe impl Sync for RelocatedLibrary {}
 
 impl RelocatedLibrary {
-    /// get dependence libraries
+    /// Retrieves the list of dependent libraries.
+    ///
+    /// This method returns an optional reference to a vector of `RelocatedLibrary` instances,
+    /// which represent the libraries that the current dynamic library depends on.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// if let Some(dependencies) = library.dep_libs() {
+    ///     for lib in dependencies {
+    ///         println!("Dependency: {:?}", lib);
+    ///     }
+    /// } else {
+    ///     println!("No dependencies found.");
+    /// }
+    /// ```
     pub fn dep_libs(&self) -> Option<&Vec<RelocatedLibrary>> {
         match &self.inner().extra {
             LibraryExtraData::Internal(extra_data) => extra_data.get_dep_libs(),
@@ -92,8 +118,21 @@ impl RelocatedLibrary {
         }
     }
 
-    /// get the dynamic library name
-    pub fn name(&self) -> &CStr {
+    /// Retrieves the name of the dynamic library.
+    ///
+    /// This method returns a string slice that represents the name of the dynamic library.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// let library_name = library.name();
+    /// println!("The dynamic library name is: {}", library_name);
+    /// ```
+    pub fn name(&self) -> &str {
+        self.inner().name.to_str().unwrap()
+    }
+
+    pub fn cname(&self) -> &CStr {
         &self.inner().name
     }
 
@@ -120,7 +159,7 @@ impl RelocatedLibrary {
         &self.inner.1
     }
 
-    pub(crate) fn base(&self) -> usize {
+    pub fn base(&self) -> usize {
         self.inner().base
     }
 
@@ -165,9 +204,7 @@ impl RelocatedLibrary {
     /// };
     /// ```
     pub unsafe fn get<'lib, T>(&'lib self, name: &str) -> Result<Symbol<'lib, T>> {
-        self.inner
-            .as_ref()
-            .1
+        self.inner()
             .symbols()
             .get_sym(&SymbolInfo::new(name))
             .map(|sym| Symbol {
@@ -209,9 +246,7 @@ impl RelocatedLibrary {
         version: &str,
     ) -> Result<Symbol<'lib, T>> {
         let version = dso::version::SymbolVersion::new(version);
-        self.inner
-            .as_ref()
-            .1
+        self.inner()
             .symbols()
             .get_sym(&SymbolInfo::new_with_version(name, version))
             .map(|sym| Symbol {

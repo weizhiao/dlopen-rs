@@ -5,7 +5,6 @@ use crate::{
     Result,
 };
 
-#[derive(Debug)]
 pub(crate) struct EhFrame(usize);
 
 impl EhFrame {

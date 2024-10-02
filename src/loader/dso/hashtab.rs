@@ -1,4 +1,4 @@
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct ELFGnuHash {
     pub nbucket: u32,
     pub table_start_idx: u32,

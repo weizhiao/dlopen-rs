@@ -45,7 +45,6 @@ struct VerDefAux {
 ///
 /// The section shall contain an array of VerNeed structures optionally
 /// followed by an array of VerNeedAux structures.
-#[derive(Debug, PartialEq, Eq)]
 #[repr(C)]
 struct VerNeed {
     /// Version of structure. This value is currently set to 1,
@@ -62,7 +61,6 @@ struct VerNeed {
 }
 
 /// Version Need Auxiliary Entries from the .gnu.version_r section
-#[derive(Debug, PartialEq, Eq)]
 #[repr(C)]
 struct VerNeedAux {
     /// Dependency name hash value (ELF hash function).
@@ -77,7 +75,6 @@ struct VerNeedAux {
     vna_next: u32,
 }
 
-#[derive(Debug, PartialEq, Eq)]
 struct VersionIndex(u16);
 
 impl VersionIndex {
@@ -86,7 +83,7 @@ impl VersionIndex {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct VersionIndexTable {
     ptr: *const VersionIndex,
 }
@@ -118,7 +115,7 @@ impl Iterator for VerNeedAuxIterator {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct VerNeedTable {
     ptr: *const VerNeed,
     num: usize,
@@ -163,7 +160,7 @@ impl IntoIterator for &VerNeedTable {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct VerDefTable {
     ptr: *const VerDef,
     num: usize,
@@ -229,7 +226,7 @@ impl IntoIterator for &VerDefTable {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct ELFVersion {
     version_ids: VersionIndexTable,
     verneeds: Option<VerNeedTable>,
@@ -252,7 +249,6 @@ impl ELFVersion {
     }
 }
 
-#[derive(Debug)]
 pub(crate) struct SymbolVersion<'a> {
     pub name: &'a str,
     pub hash: u32,

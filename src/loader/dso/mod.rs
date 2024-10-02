@@ -4,7 +4,7 @@ mod ehdr;
 mod ehframe;
 #[cfg(feature = "std")]
 mod file;
-pub(crate) mod hashtab;
+mod hashtab;
 mod segment;
 #[cfg(feature = "tls")]
 pub(crate) mod tls;
@@ -16,11 +16,8 @@ use super::{
     LibraryExtraData, RelocatedLibrary, RelocatedLibraryInner,
 };
 use crate::{parse_dynamic_error, Result};
+use alloc::ffi::CString;
 use alloc::{boxed::Box, vec::Vec};
-use alloc::{
-    ffi::CString,
-    string::{String, ToString},
-};
 use binary::ELFBinary;
 use core::{
     fmt::Debug,
@@ -32,7 +29,7 @@ use elf::abi::*;
 use hashtab::ELFGnuHash;
 use segment::{ELFRelro, ELFSegments, MASK, PAGE_SIZE};
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct ELFStringTable<'data> {
     data: &'data [u8],
 }
@@ -49,13 +46,11 @@ impl<'data> ELFStringTable<'data> {
     }
 }
 
-#[derive(Debug)]
 pub(crate) struct ELFRelocation {
     pub(crate) pltrel: Option<&'static [Rela]>,
     pub(crate) rel: Option<&'static [Rela]>,
 }
 
-#[derive(Debug)]
 pub(crate) struct SymbolData {
     /// .gnu.hash
     pub hashtab: ELFGnuHash,
@@ -180,6 +175,17 @@ pub(crate) struct ExtraData {
     dep_libs: Option<Vec<RelocatedLibrary>>,
 }
 
+impl Debug for ExtraData {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut binding = f.debug_struct("ExtraData");
+        let f = binding.field("segments", &self.segments);
+        if let Some(dep_libs) = &self.dep_libs {
+            f.field("dep_libs", dep_libs);
+        }
+        f.finish()
+    }
+}
+
 impl ExtraData {
     #[cfg(feature = "std")]
     pub(crate) fn phdrs(&self) -> Option<&[Phdr]> {
@@ -233,7 +239,7 @@ pub(crate) struct ELFLibraryInner {
     /// debug link map
     #[cfg(feature = "debug")]
     link_map: super::debug::DebugInfo,
-    /// common elf data
+    /// extra elf data
     extra: ExtraData,
     /// rela.dyn and rela.plt
     relocation: ELFRelocation,
@@ -247,8 +253,24 @@ pub(crate) struct ELFLibraryInner {
     needed_libs: Vec<&'static str>,
 }
 
+impl Debug for ELFLibraryInner {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ELFLibrary")
+            .field("name", &self.name)
+            .field("extra", &self.extra)
+            .field("needed_libs", &self.needed_libs)
+            .finish()
+    }
+}
+
 pub struct ELFLibrary {
     inner: ELFLibraryInner,
+}
+
+impl Debug for ELFLibrary {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        self.inner.fmt(f)
+    }
 }
 
 impl From<ELFLibrary> for RelocatedLibraryInner {
@@ -285,10 +307,10 @@ impl ELFLibrary {
     ///
     #[cfg(feature = "std")]
     pub fn from_file<P: AsRef<std::ffi::OsStr>>(path: P) -> Result<ELFLibrary> {
-        let file_name = path.as_ref().to_str().unwrap().to_string();
+        let file_name = path.as_ref().to_str().unwrap();
         let file = std::fs::File::open(path.as_ref())?;
         let mut file = super::dso::file::ELFFile::new(file);
-        let inner = file.load(file_name)?;
+        let inner = file.load(CString::new(file_name).unwrap())?;
         Ok(ELFLibrary { inner })
     }
 
@@ -322,9 +344,9 @@ impl ELFLibrary {
     /// # Errors
     /// Returns an error if the ELF file cannot be loaded or if there is an issue with the file handle.
     #[cfg(feature = "std")]
-    pub fn from_open_file(file: std::fs::File, name: impl ToString) -> Result<ELFLibrary> {
+    pub fn from_open_file(file: std::fs::File, name: impl AsRef<str>) -> Result<ELFLibrary> {
         let mut file = super::dso::file::ELFFile::new(file);
-        let inner = file.load(name.to_string())?;
+        let inner = file.load(CString::new(name.as_ref()).unwrap())?;
         Ok(ELFLibrary { inner })
     }
 
@@ -337,15 +359,15 @@ impl ELFLibrary {
     /// let bytes = std::fs::read(path).unwrap();
     /// let lib = ELFLibrary::from_binary(&bytes).unwarp();
     /// ```
-    pub fn from_binary(bytes: &[u8], name: impl ToString) -> Result<ELFLibrary> {
+    pub fn from_binary(bytes: &[u8], name: impl AsRef<str>) -> Result<ELFLibrary> {
         let mut file = ELFBinary::new(bytes);
-        let inner = file.load(name.to_string())?;
+        let inner = file.load(CString::new(name.as_ref()).unwrap())?;
         Ok(ELFLibrary { inner })
     }
 
     /// get the name of the dependent libraries
-    pub fn needed_libs(&mut self) -> Vec<&str> {
-        core::mem::take(&mut self.inner.needed_libs)
+    pub fn needed_libs(&self) -> &Vec<&str> {
+        &self.inner.needed_libs
     }
 
     #[inline]
@@ -398,7 +420,7 @@ impl ELFLibrary {
 pub(crate) trait SharedObject: MapSegment {
     /// validate ehdr and get phdrs
     fn parse_ehdr(&mut self) -> crate::Result<(Range<usize>, Vec<u8>)>;
-    fn load(&mut self, name: String) -> Result<ELFLibraryInner> {
+    fn load(&mut self, name: CString) -> Result<ELFLibraryInner> {
         let (phdr_range, phdrs) = self.parse_ehdr()?;
         debug_assert_eq!(phdrs.len() % PHDR_SIZE, 0);
         let phdrs = unsafe {
@@ -487,7 +509,6 @@ pub(crate) trait SharedObject: MapSegment {
         let dynamics = dynamics
             .ok_or(parse_dynamic_error("elf file does not have dynamic"))?
             .finish(base);
-        let name = CString::new(name).unwrap();
         let relocation = ELFRelocation {
             pltrel: dynamics.pltrel(),
             rel: dynamics.rela(),
