@@ -33,7 +33,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 extern crate alloc;
 
-pub(crate) mod loader;
+mod loader;
 #[cfg(feature = "std")]
 mod register;
 

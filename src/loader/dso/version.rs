@@ -1,4 +1,4 @@
-use super::SymbolData;
+use super::{ELFStringTable, SymbolData};
 use elf::abi;
 
 /// The special GNU extension section .gnu.version_d has a section type of SHT_GNU_VERDEF
@@ -26,6 +26,12 @@ struct VerDef {
     vd_aux: u32,
     /// Offset to the next VerDef entry, in bytes.
     vd_next: u32,
+}
+
+impl VerDef {
+    fn index(&self) -> usize {
+        (self.vd_ndx & abi::VER_NDX_VERSION) as usize
+    }
 }
 
 #[repr(C)]
@@ -75,11 +81,21 @@ struct VerNeedAux {
     vna_next: u32,
 }
 
+impl VerNeedAux {
+    fn index(&self) -> usize {
+        (self.vna_other & abi::VER_NDX_VERSION) as usize
+    }
+}
+
 struct VersionIndex(u16);
 
 impl VersionIndex {
     fn index(&self) -> u16 {
         self.0 & abi::VER_NDX_VERSION
+    }
+
+    pub fn is_hidden(&self) -> bool {
+        (self.0 & abi::VER_NDX_HIDDEN) != 0
     }
 }
 
@@ -226,11 +242,17 @@ impl IntoIterator for &VerDefTable {
     }
 }
 
-#[derive(Clone)]
+/// 保存着所有依赖的和定义的版本号
+struct Version {
+    name: &'static str,
+    hash: u32,
+}
+
 pub(crate) struct ELFVersion {
     version_ids: VersionIndexTable,
-    verneeds: Option<VerNeedTable>,
-    verdefs: Option<VerDefTable>,
+    // 因为verdef和verneed的idx不重叠，因此我们可以使用数组将其存起来
+    // 这样可以加快之后符号版本号的匹配
+    versions: Vec<Version>,
 }
 
 impl ELFVersion {
@@ -238,20 +260,67 @@ impl ELFVersion {
         version_ids_off: usize,
         verneeds: Option<(usize, usize)>,
         verdefs: Option<(usize, usize)>,
+        strtab: &ELFStringTable<'static>,
     ) -> ELFVersion {
+        let mut versions = vec![];
+        //记录最大的verison idx
+        let mut ndx_max = 0;
+        if let Some((ptr, num)) = verdefs {
+            let verdef_table = VerDefTable { ptr: ptr as _, num };
+            for (verdef, _) in verdef_table.into_iter() {
+                if ndx_max < verdef.index() {
+                    ndx_max = verdef.index();
+                }
+            }
+        }
+        if let Some((ptr, num)) = verneeds {
+            let verneed_table = VerNeedTable { ptr: ptr as _, num };
+            for (_, vna_iter) in verneed_table.into_iter() {
+                for aux in vna_iter {
+                    if ndx_max < aux.index() {
+                        ndx_max = aux.index();
+                    }
+                }
+            }
+        }
+        // 分配足够大的version数组
+        versions.reserve(ndx_max + 1);
+        unsafe { versions.set_len(ndx_max + 1) };
+        if let Some((ptr, num)) = verdefs {
+            let verdef_table = VerDefTable { ptr: ptr as _, num };
+            for (verdef, mut vd_iter) in verdef_table.into_iter() {
+                let name = strtab.get(vd_iter.next().unwrap().vda_name as usize);
+                versions[verdef.index()] = Version {
+                    name,
+                    hash: verdef.vd_hash,
+                };
+            }
+        }
+        if let Some((ptr, num)) = verneeds {
+            let verneed_table = VerNeedTable { ptr: ptr as _, num };
+            for (_, vna_iter) in verneed_table.into_iter() {
+                for aux in vna_iter {
+                    let name = strtab.get(aux.vna_name as usize);
+                    versions[aux.index()] = Version {
+                        name,
+                        hash: aux.vna_hash,
+                    };
+                }
+            }
+        }
         ELFVersion {
             version_ids: VersionIndexTable {
                 ptr: version_ids_off as _,
             },
-            verneeds: verneeds.map(|(off, num)| VerNeedTable { ptr: off as _, num }),
-            verdefs: verdefs.map(|(off, num)| VerDefTable { ptr: off as _, num }),
+            versions,
         }
     }
 }
 
 pub(crate) struct SymbolVersion<'a> {
-    pub name: &'a str,
-    pub hash: u32,
+    name: &'a str,
+    hash: u32,
+    hidden: bool,
 }
 
 impl<'a> SymbolVersion<'a> {
@@ -285,55 +354,47 @@ impl<'a> SymbolVersion<'a> {
 
     pub(crate) fn new(name: &'a str) -> Self {
         let hash = Self::dl_elf_hash(name);
-        SymbolVersion { name, hash }
+        SymbolVersion {
+            name,
+            hash,
+            hidden: true,
+        }
     }
 }
 
 impl SymbolData {
     pub(crate) fn get_requirement(&self, sym_idx: usize) -> Option<SymbolVersion> {
-        if let Some(version) = &self.version {
-            let ver_ndx = version.version_ids.get(sym_idx);
+        if let Some(gnu_version) = &self.version {
+            let ver_ndx = gnu_version.version_ids.get(sym_idx);
             if ver_ndx.index() <= 1 {
                 return None;
             }
-            if let Some(verneeds) = &version.verneeds {
-                for (_, vna_iter) in verneeds {
-                    for vna in vna_iter {
-                        if vna.vna_other != ver_ndx.index() {
-                            continue;
-                        }
-                        let name = self.strtab.get(vna.vna_name as usize);
-                        let hash = vna.vna_hash;
-                        return Some(SymbolVersion { name, hash });
-                    }
-                }
-            }
+            let hidden = ver_ndx.is_hidden();
+            let version = &gnu_version.versions[ver_ndx.index() as usize];
+            return Some(SymbolVersion {
+                name: version.name,
+                hash: version.hash,
+                hidden,
+            });
         }
         None
     }
 
     pub(crate) fn check_match(&self, sym_idx: usize, version: &Option<SymbolVersion>) -> bool {
         if let Some(version) = version {
-            let def_version = self.version.as_ref().unwrap();
-            let verdefs = def_version.verdefs.as_ref().unwrap();
-            let ver_ndx = def_version.version_ids.get(sym_idx);
-            for (vd, vda_iter) in verdefs {
-                if vd.vd_ndx != ver_ndx.index() {
-                    continue;
-                }
-                let hash = vd.vd_hash;
-                if hash == version.hash
-                    && vda_iter
-                        .into_iter()
-                        .any(|vda| self.strtab.get(vda.vda_name as usize) == version.name)
-                {
-                    return true;
-                }
-                return false;
+            let gnu_version = self.version.as_ref().unwrap();
+            let ver_ndx = gnu_version.version_ids.get(sym_idx);
+            let def_hidden = ver_ndx.is_hidden();
+            let def_version = &gnu_version.versions[ver_ndx.index() as usize];
+            // 使用版本号一致的符号或者使用默认符号(这里认为第一个不隐藏的符号就是默认符号)
+            if (def_version.hash == version.hash && def_version.name == version.name)
+                || (!version.hidden && !def_hidden)
+            {
+                return true;
             }
-            false
-        } else {
-            true
+            return false;
         }
+        // 如果需要重定位的符号不使用重定位信息，那么我们始终返回第一个找到的符号
+        true
     }
 }

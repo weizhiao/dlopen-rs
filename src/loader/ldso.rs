@@ -104,6 +104,7 @@ impl ELFLibrary {
                 dynamic
                     .verdef()
                     .map(|(off, num)| (off + link_map.l_addr as usize, num)),
+                &dynamic.strtab(),
             )
         });
         #[cfg(feature = "debug")]

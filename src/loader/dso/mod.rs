@@ -125,6 +125,7 @@ impl SymbolData {
                 if sym_name == symbol.name && self.check_match(dynsym_idx, &symbol.version) {
                     return Some(cur_symbol);
                 }
+                #[cfg(not(feature = "version"))]
                 if sym_name == symbol.name {
                     return Some(cur_symbol);
                 }
@@ -519,6 +520,7 @@ pub(crate) trait SharedObject: MapSegment {
                 version_idx + base,
                 dynamics.verneed().map(|(off, num)| (off + base, num)),
                 dynamics.verdef().map(|(off, num)| (off + base, num)),
+                &dynamics.strtab(),
             )
         });
         #[cfg(feature = "debug")]
