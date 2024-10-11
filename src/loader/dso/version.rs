@@ -1,4 +1,4 @@
-use super::{ELFStringTable, SymbolData};
+use super::{symbol::ELFStringTable, SymbolData};
 use elf::abi;
 
 /// The special GNU extension section .gnu.version_d has a section type of SHT_GNU_VERDEF
@@ -257,11 +257,16 @@ pub(crate) struct ELFVersion {
 
 impl ELFVersion {
     pub(crate) fn new(
-        version_ids_off: usize,
+        version_ids_off: Option<usize>,
         verneeds: Option<(usize, usize)>,
         verdefs: Option<(usize, usize)>,
-        strtab: &ELFStringTable<'static>,
-    ) -> ELFVersion {
+        strtab: &ELFStringTable,
+    ) -> Option<ELFVersion> {
+        let version_ids_off = if let Some(off) = version_ids_off {
+            off
+        } else {
+            return None;
+        };
         let mut versions = vec![];
         //记录最大的verison idx
         let mut ndx_max = 0;
@@ -308,12 +313,12 @@ impl ELFVersion {
                 }
             }
         }
-        ELFVersion {
+        Some(ELFVersion {
             version_ids: VersionIndexTable {
                 ptr: version_ids_off as _,
             },
             versions,
-        }
+        })
     }
 }
 

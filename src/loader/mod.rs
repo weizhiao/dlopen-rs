@@ -16,7 +16,10 @@ use core::{
 };
 
 use alloc::{ffi::CString, format, sync::Arc, vec::Vec};
-use dso::{ExtraData, SymbolData, SymbolInfo};
+use dso::{
+    symbol::{SymbolData, SymbolInfo},
+    ExtraData,
+};
 
 use crate::{find_symbol_error, Result};
 pub use dso::ELFLibrary;

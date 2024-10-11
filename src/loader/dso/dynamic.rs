@@ -1,6 +1,5 @@
-use super::{hashtab::ELFGnuHash, ELFStringTable};
 use crate::{
-    loader::arch::{Dyn, ELFSymbol, Rela},
+    loader::arch::{Dyn, Rela},
     parse_dynamic_error, Result,
 };
 use alloc::vec::Vec;
@@ -10,25 +9,45 @@ use elf::abi::*;
 pub(crate) struct ELFRawDynamic {
     #[cfg(feature = "debug")]
     dyn_addr: usize,
+	/// DT_GNU_HASH
     hash_off: usize,
+	/// DT_STMTAB
     symtab_off: usize,
+	/// DT_STRTAB
     strtab_off: usize,
+	/// DT_STRSZ
     strtab_size: usize,
+	/// DT_JMPREL
     pltrel_off: Option<usize>,
+	/// DT_PLTRELSZ
     pltrel_size: Option<usize>,
+	/// DT_RELA
     rela_off: Option<usize>,
+	/// DT_RELASZ
     rela_size: Option<usize>,
+	/// DT_INIT
     init_off: Option<usize>,
+	/// DT_FINI
     fini_off: Option<usize>,
+	/// DT_INIT_ARRAY
     init_array_off: Option<usize>,
+	/// DT_INIT_ARRAYSZ
     init_array_size: Option<usize>,
+	/// DT_FINI_ARRAY
     fini_array_off: Option<usize>,
+	/// DT_FINI_ARRAYSZ
     fini_array_size: Option<usize>,
+	/// DT_VERSYM
     version_ids_off: Option<usize>,
+	/// DT_VERNEED
     verneed_off: Option<usize>,
+	/// DT_VERNEEDNUM
     verneed_num: Option<usize>,
+	/// DT_VERDEF
     verdef_off: Option<usize>,
+	/// DT_VERDEFNUM
     verdef_num: Option<usize>,
+	/// DT_NEEDED
     needed_libs: Vec<usize>,
 }
 
@@ -125,12 +144,8 @@ impl ELFRawDynamic {
         })
     }
 
+	/// 将偏移地址映射到实际内存中的地址
     pub(crate) fn finish(self, base: usize) -> ELFDynamic {
-        let hashtable = unsafe { ELFGnuHash::parse((self.hash_off + base) as *const u8) };
-        let symtab = (self.symtab_off + base) as *const ELFSymbol;
-        let strtab = ELFStringTable::new(unsafe {
-            from_raw_parts((base + self.strtab_off) as *const u8, self.strtab_size)
-        });
         let pltrel = self.pltrel_off.map(|pltrel_off| unsafe {
             from_raw_parts(
                 (base + pltrel_off) as *const Rela,
@@ -157,11 +172,6 @@ impl ELFRawDynamic {
             let ptr = fini_array_off + base;
             unsafe { from_raw_parts(ptr as _, self.fini_array_size.unwrap() / size_of::<usize>()) }
         });
-        let needed_libs: Vec<&'static str> = self
-            .needed_libs
-            .iter()
-            .map(|needed_lib| strtab.get(*needed_lib))
-            .collect();
         let verneed = self
             .verneed_off
             .map(|verneed_off| (verneed_off, self.verneed_num.unwrap()));
@@ -171,16 +181,17 @@ impl ELFRawDynamic {
         ELFDynamic {
             #[cfg(feature = "debug")]
             dyn_addr: self.dyn_addr,
-            hashtab: hashtable,
-            symtab,
-            strtab,
+            hash_off: self.hash_off + base,
+            symtab_off: self.symtab_off + base,
+            strtab_off: self.strtab_off + base,
+            strtab_size: self.strtab_size,
             init_fn,
             init_array_fn,
             fini_fn,
             fini_array_fn,
             pltrel,
             rela,
-            needed_libs,
+            needed_libs: self.needed_libs,
             version_idx: self.version_ids_off,
             verneed,
             verdef,
@@ -197,16 +208,17 @@ impl ELFRawDynamic {
 pub(crate) struct ELFDynamic {
     #[cfg(feature = "debug")]
     dyn_addr: usize,
-    hashtab: ELFGnuHash,
-    symtab: *const ELFSymbol,
-    strtab: ELFStringTable<'static>,
+    hash_off: usize,
+    symtab_off: usize,
+    strtab_off: usize,
+    strtab_size: usize,
     init_fn: Option<extern "C" fn()>,
     init_array_fn: Option<&'static [extern "C" fn()]>,
     fini_fn: Option<extern "C" fn()>,
     fini_array_fn: Option<&'static [extern "C" fn()]>,
     pltrel: Option<&'static [Rela]>,
     rela: Option<&'static [Rela]>,
-    needed_libs: Vec<&'static str>,
+    needed_libs: Vec<usize>,
     version_idx: Option<usize>,
     verneed: Option<(usize, usize)>,
     verdef: Option<(usize, usize)>,
@@ -218,16 +230,20 @@ impl ELFDynamic {
         self.dyn_addr
     }
 
-    pub(crate) fn strtab(&self) -> ELFStringTable<'static> {
-        self.strtab.clone()
+    pub(crate) fn strtab(&self) -> usize {
+        self.strtab_off
     }
 
-    pub(crate) fn hashtab(&self) -> ELFGnuHash {
-        self.hashtab.clone()
+    pub(crate) fn strtab_size(&self) -> usize {
+        self.strtab_size
     }
 
-    pub(crate) fn symtab(&self) -> *const ELFSymbol {
-        self.symtab
+    pub(crate) fn hashtab(&self) -> usize {
+        self.hash_off
+    }
+
+    pub(crate) fn symtab(&self) -> usize {
+        self.symtab_off
     }
 
     pub(crate) fn pltrel(&self) -> Option<&'static [Rela]> {
@@ -269,7 +285,7 @@ impl ELFDynamic {
         self.verdef
     }
 
-    pub(crate) fn needed_libs(self) -> Vec<&'static str> {
-        self.needed_libs
+    pub(crate) fn needed_libs(&self) -> &Vec<usize> {
+        &self.needed_libs
     }
 }

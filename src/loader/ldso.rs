@@ -1,6 +1,6 @@
 use super::{
     arch::Dyn,
-    dso::{dynamic::ELFRawDynamic, SymbolData},
+    dso::{dynamic::ELFRawDynamic, symbol::SymbolData},
     ELFLibrary, LibraryExtraData, RelocatedLibraryInner,
 };
 use crate::{find_lib_error, RelocatedLibrary, Result};
@@ -93,20 +93,7 @@ impl ELFLibrary {
         } else {
             link_map.l_addr as usize
         };
-        let dynamic = dynamic.finish(base);
-        #[cfg(feature = "version")]
-        let version = dynamic.version_idx().map(|version_idx| {
-            super::dso::version::ELFVersion::new(
-                version_idx + base,
-                dynamic
-                    .verneed()
-                    .map(|(off, num)| (off + link_map.l_addr as usize, num)),
-                dynamic
-                    .verdef()
-                    .map(|(off, num)| (off + link_map.l_addr as usize, num)),
-                &dynamic.strtab(),
-            )
-        });
+        let dynamics = dynamic.finish(base);
         #[cfg(feature = "debug")]
         let debug = unsafe {
             use super::debug::*;
@@ -132,7 +119,22 @@ impl ELFLibrary {
             let module_id = module_id.assume_init();
             module_id
         };
-
+        let symbols = SymbolData::new(
+            dynamics.hashtab(),
+            dynamics.symtab(),
+            dynamics.strtab(),
+            dynamics.strtab_size(),
+            #[cfg(feature = "version")]
+            dynamics.version_idx().map(|version_idx| version_idx + base),
+            #[cfg(feature = "version")]
+            dynamics
+                .verneed()
+                .map(|(off, num)| (off + link_map.l_addr as usize, num)),
+            #[cfg(feature = "version")]
+            dynamics
+                .verdef()
+                .map(|(off, num)| (off + link_map.l_addr as usize, num)),
+        );
         Ok(RelocatedLibrary {
             inner: Arc::new((
                 AtomicBool::new(false),
@@ -143,13 +145,7 @@ impl ELFLibrary {
                     #[cfg(feature = "tls")]
                     tls: Some(tls_module_id),
                     base: link_map.l_addr as _,
-                    symbols: SymbolData {
-                        hashtab: dynamic.hashtab(),
-                        symtab: dynamic.symtab(),
-                        strtab: dynamic.strtab(),
-                        #[cfg(feature = "version")]
-                        version,
-                    },
+                    symbols,
                     extra: LibraryExtraData::External(ExtraData { handle }),
                 },
             )),

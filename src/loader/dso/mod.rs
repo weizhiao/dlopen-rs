@@ -4,154 +4,31 @@ mod ehdr;
 mod ehframe;
 #[cfg(feature = "std")]
 mod file;
-mod hashtab;
 mod segment;
+pub(crate) mod symbol;
 #[cfg(feature = "tls")]
 pub(crate) mod tls;
 #[cfg(feature = "version")]
 pub(crate) mod version;
 
 use super::{
-    arch::{ELFSymbol, Phdr, Rela, PHDR_SIZE},
+    arch::{Phdr, Rela, PHDR_SIZE},
     LibraryExtraData, RelocatedLibrary, RelocatedLibraryInner,
 };
 use crate::{parse_dynamic_error, Result};
 use alloc::ffi::CString;
 use alloc::{boxed::Box, vec::Vec};
 use binary::ELFBinary;
-use core::{
-    fmt::Debug,
-    ops::{Range, Shr},
-};
+use core::{fmt::Debug, ops::Range};
 use dynamic::ELFRawDynamic;
 use ehframe::EhFrame;
 use elf::abi::*;
-use hashtab::ELFGnuHash;
 use segment::{ELFRelro, ELFSegments, MASK, PAGE_SIZE};
-
-#[derive(Clone)]
-pub(crate) struct ELFStringTable<'data> {
-    data: &'data [u8],
-}
-
-impl<'data> ELFStringTable<'data> {
-    fn new(data: &'data [u8]) -> Self {
-        ELFStringTable { data }
-    }
-
-    fn get(&self, offset: usize) -> &'data str {
-        let start = self.data.get(offset..).unwrap();
-        let end = start.iter().position(|&b| b == 0u8).unwrap();
-        unsafe { core::str::from_utf8_unchecked(start.split_at(end).0) }
-    }
-}
+use symbol::SymbolData;
 
 pub(crate) struct ELFRelocation {
     pub(crate) pltrel: Option<&'static [Rela]>,
     pub(crate) rel: Option<&'static [Rela]>,
-}
-
-pub(crate) struct SymbolData {
-    /// .gnu.hash
-    pub hashtab: ELFGnuHash,
-    /// .dynsym
-    pub symtab: *const ELFSymbol,
-    /// .dynstr
-    pub strtab: ELFStringTable<'static>,
-    #[cfg(feature = "version")]
-    /// .gnu.version
-    pub version: Option<version::ELFVersion>,
-}
-
-pub(crate) struct SymbolInfo<'a> {
-    pub name: &'a str,
-    #[cfg(feature = "version")]
-    version: Option<version::SymbolVersion<'a>>,
-}
-
-impl<'a> SymbolInfo<'a> {
-    pub(crate) const fn new(name: &'a str) -> Self {
-        SymbolInfo {
-            name,
-            #[cfg(feature = "version")]
-            version: None,
-        }
-    }
-
-    #[cfg(feature = "version")]
-    pub(crate) const fn new_with_version(
-        name: &'a str,
-        version: version::SymbolVersion<'a>,
-    ) -> Self {
-        SymbolInfo {
-            name,
-            version: Some(version),
-        }
-    }
-}
-
-impl SymbolData {
-    pub(crate) fn get_sym(&self, symbol: &SymbolInfo) -> Option<&ELFSymbol> {
-        let hash = ELFGnuHash::gnu_hash(symbol.name.as_bytes());
-        let bloom_width: u32 = 8 * size_of::<usize>() as u32;
-        let bloom_idx = (hash / (bloom_width)) as usize % self.hashtab.blooms.len();
-        let filter = self.hashtab.blooms[bloom_idx] as u64;
-        if filter & (1 << (hash % bloom_width)) == 0 {
-            return None;
-        }
-        let hash2 = hash.shr(self.hashtab.nshift);
-        if filter & (1 << (hash2 % bloom_width)) == 0 {
-            return None;
-        }
-        let table_start_idx = self.hashtab.table_start_idx as usize;
-        let chain_start_idx = unsafe {
-            self.hashtab
-                .buckets
-                .add((hash as usize) % self.hashtab.nbucket as usize)
-                .read()
-        } as usize;
-        if chain_start_idx == 0 {
-            return None;
-        }
-        let mut dynsym_idx = chain_start_idx;
-        let mut cur_chain = unsafe { self.hashtab.chains.add(dynsym_idx - table_start_idx) };
-        let mut cur_symbol_ptr = unsafe { self.symtab.add(dynsym_idx) };
-        loop {
-            let chain_hash = unsafe { cur_chain.read() };
-            if hash | 1 == chain_hash | 1 {
-                let cur_symbol = unsafe { &*cur_symbol_ptr };
-                let sym_name = self.strtab.get(cur_symbol.st_name as usize);
-                #[cfg(feature = "version")]
-                if sym_name == symbol.name && self.check_match(dynsym_idx, &symbol.version) {
-                    return Some(cur_symbol);
-                }
-                #[cfg(not(feature = "version"))]
-                if sym_name == symbol.name {
-                    return Some(cur_symbol);
-                }
-            }
-            if chain_hash & 1 != 0 {
-                break;
-            }
-            cur_chain = unsafe { cur_chain.add(1) };
-            cur_symbol_ptr = unsafe { cur_symbol_ptr.add(1) };
-            dynsym_idx += 1;
-        }
-        None
-    }
-
-    pub(crate) fn rel_symbol(&self, idx: usize) -> (&ELFSymbol, SymbolInfo) {
-        let symbol = unsafe { &*self.symtab.add(idx) };
-        let name = self.strtab.get(symbol.st_name as usize);
-        (
-            symbol,
-            SymbolInfo {
-                name,
-                #[cfg(feature = "version")]
-                version: self.get_requirement(idx),
-            },
-        )
-    }
 }
 
 #[allow(unused)]
@@ -433,6 +310,7 @@ pub(crate) trait SharedObject: MapSegment {
         let mut addr_min_off = 0;
         let mut addr_min_prot = 0;
 
+        //找到最小的偏移地址和最大的偏移地址
         for phdr in phdrs.iter() {
             if phdr.p_type == PT_LOAD {
                 let addr_start = phdr.p_vaddr as usize;
@@ -448,13 +326,16 @@ pub(crate) trait SharedObject: MapSegment {
             }
         }
 
+        // 按页对齐
         addr_max += PAGE_SIZE - 1;
         addr_max &= MASK;
         addr_min &= MASK as usize;
         addr_min_off &= MASK;
 
         let size = addr_max - addr_min;
+        // 创建加载动态库所需的空间
         let segments = self.create_segments(addr_min, size, addr_min_off, addr_min_prot)?;
+        // 获取基地址
         let base = segments.base();
         let mut unwind = None;
         let mut dynamics = None;
@@ -463,9 +344,12 @@ pub(crate) trait SharedObject: MapSegment {
         let mut tls = None;
         let mut loaded_phdrs: Option<&[Phdr]> = None;
 
+        // 根据Phdr的类型进行不同操作
         for phdr in phdrs {
             match phdr.p_type {
+                // 将segment加载到内存中
                 PT_LOAD => self.load_segment(&segments, phdr)?,
+                // 解析.dynamic section
                 PT_DYNAMIC => {
                     dynamics = Some(ELFRawDynamic::new((phdr.p_vaddr as usize + base) as _)?)
                 }
@@ -503,6 +387,7 @@ pub(crate) trait SharedObject: MapSegment {
             None
         });
 
+        // 注册unwind信息
         if let Some(unwind_info) = unwind.as_ref() {
             unwind_info.register_unwind(&segments);
         }
@@ -514,28 +399,30 @@ pub(crate) trait SharedObject: MapSegment {
             pltrel: dynamics.pltrel(),
             rel: dynamics.rela(),
         };
-        #[cfg(feature = "version")]
-        let version = dynamics.version_idx().map(|version_idx| {
-            version::ELFVersion::new(
-                version_idx + base,
-                dynamics.verneed().map(|(off, num)| (off + base, num)),
-                dynamics.verdef().map(|(off, num)| (off + base, num)),
-                &dynamics.strtab(),
-            )
-        });
         #[cfg(feature = "debug")]
         let link_map = unsafe {
             crate::loader::debug::dl_debug_init(segments.base(), name.as_ptr(), dynamics.addr())
         };
+        let symbols = SymbolData::new(
+            dynamics.hashtab(),
+            dynamics.symtab(),
+            dynamics.strtab(),
+            dynamics.strtab_size(),
+            #[cfg(feature = "version")]
+            dynamics.version_idx().map(|version_idx| version_idx + base),
+            #[cfg(feature = "version")]
+            dynamics.verneed().map(|(off, num)| (off + base, num)),
+            #[cfg(feature = "version")]
+            dynamics.verdef().map(|(off, num)| (off + base, num)),
+        );
+        let needed_libs: Vec<&'static str> = dynamics
+            .needed_libs()
+            .iter()
+            .map(|needed_lib| symbols.strtab().get(*needed_lib))
+            .collect();
         let elf_lib = ELFLibraryInner {
             name,
-            symbols: SymbolData {
-                hashtab: dynamics.hashtab(),
-                symtab: dynamics.symtab(),
-                strtab: dynamics.strtab(),
-                #[cfg(feature = "version")]
-                version,
-            },
+            symbols,
             #[cfg(feature = "debug")]
             link_map,
             extra: ExtraData {
@@ -554,7 +441,7 @@ pub(crate) trait SharedObject: MapSegment {
             relocation,
             init_fn: dynamics.init_fn(),
             init_array_fn: dynamics.init_array_fn(),
-            needed_libs: dynamics.needed_libs(),
+            needed_libs,
         };
         Ok(elf_lib)
     }

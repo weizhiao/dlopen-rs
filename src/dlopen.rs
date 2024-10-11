@@ -7,17 +7,17 @@ static LD_LIBRARY_PATH: OnceLock<Vec<PathBuf>> = OnceLock::new();
 const SYS_LIBS: [&'static str; 4] = ["libc", "libgcc_s", "libstdc++", "libm"];
 
 impl ELFLibrary {
-	/// Load a shared library from a specified path
+    /// Load a shared library from a specified path
     ///
-	/// # Note
-	/// Please set the `RUST_LD_LIBRARY_PATH` environment variable before calling this function. 
-	/// dlopen-rs will look for dependent dynamic libraries in the paths saved in `RUST_LD_LIBRARY_PATH`. 
-	/// The way to set `RUST_LD_LIBRARY_PATH` is the same as `LD_LIBRARY_PATH`.
+    /// # Note
+    /// Please set the `RUST_LD_LIBRARY_PATH` environment variable before calling this function.
+    /// dlopen-rs will look for dependent dynamic libraries in the paths saved in `RUST_LD_LIBRARY_PATH`.
+    /// The way to set `RUST_LD_LIBRARY_PATH` is the same as `LD_LIBRARY_PATH`.
     ///
     /// # Example
     /// ```no_run
     /// use std::path::Path;
-    /// use dlopen_rs::ELFLibrary; 
+    /// use dlopen_rs::ELFLibrary;
     ///
     /// let path = Path::new("/path/to/library.so");
     /// let lib = ELFLibrary::dlopen(path).expect("Failed to load library");
