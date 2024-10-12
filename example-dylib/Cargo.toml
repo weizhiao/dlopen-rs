@@ -1,10 +1,9 @@
 [package]
 name = "example_dylib"
-version = "0.2.0"
-authors = ["Szymon Wieloch <szymon.wieloch@gmail.com>",
-           "OpenByte <development.openbyte@gmail.com>"]
+version = "0.1.0"
+authors = ["wzhao <1207410841@qq.com>"]
 description = "Example dynamic link library for executing tests of libraries that load and operate on dynamic link libraries"
-license = "MIT"
+license = "Apache-2.0"
 edition = "2021"
 
 [lib]

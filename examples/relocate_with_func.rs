@@ -23,27 +23,15 @@ fn main() {
         })
         .unwrap();
 
-    let f = unsafe {
-        libexample
-            .get::<extern "C" fn(i32) -> i32>("c_fun_add_two")
-            .unwrap()
-    };
-    println!("{}", f(2));
+    let f = unsafe { libexample.get::<fn(i32, i32) -> i32>("add").unwrap() };
+    println!("{}", f(1, 1));
 
-    let f = unsafe {
-        libexample
-            .get::<extern "C" fn()>("c_fun_print_something_else")
-            .unwrap()
-    };
+    let f = unsafe { libexample.get::<fn(&str)>("print").unwrap() };
+    f("dlopen-rs: hello world");
+
+    let f = unsafe { libexample.get::<fn()>("thread_local").unwrap() };
     f();
 
-    let f = unsafe {
-        libexample
-            .get::<extern "C" fn()>("c_func_thread_local")
-            .unwrap()
-    };
-    f();
-
-    let f = unsafe { libexample.get::<extern "C" fn()>("c_func_panic").unwrap() };
+    let f = unsafe { libexample.get::<fn()>("panic").unwrap() };
     f();
 }

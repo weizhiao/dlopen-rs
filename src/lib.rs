@@ -20,12 +20,12 @@
 //!		.relocate(&[libgcc, libc])
 //!		.unwrap();
 //!
-//! let f = unsafe {
+//! let add = unsafe {
 //! 	libexample
-//! 	.get::<extern "C" fn(i32) -> i32>("c_fun_add_two")
+//! 	.get::<fn(i32, i32) -> i32>("add")
 //! 	.unwrap()
 //! };
-//! println!("{}", f(2));
+//! println!("{}", add(1,1));
 //! ```
 #![cfg_attr(feature = "nightly", allow(internal_features))]
 #![cfg_attr(feature = "nightly", feature(core_intrinsics))]

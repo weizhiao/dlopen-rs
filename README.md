@@ -29,7 +29,10 @@ Additional, it integrates seamlessly with the system’s dynamic linker in `std`
 | libunwind | No      | Enable this if the program uses libunwind to handle exceptions.                                                                                       |
 
 
-## Example
+## Examples
+
+### Example 1
+Fine-grained control over the dynamic library loading process:
 ```rust
 use dlopen_rs::ELFLibrary;
 use nix::libc::size_t;
@@ -54,21 +57,41 @@ fn main() {
             }
         })
         .unwrap();
-    let f = unsafe {
+    let add = unsafe {
         libexample
-            .get::<extern "C" fn(i32) -> i32>("c_fun_add_two")
+            .get::<fn(i32, i32) -> i32>("add")
             .unwrap()
     };
-    println!("{}", f(2));
+    println!("{}", f(1,1));
 
-    let f = unsafe {
+    let print = unsafe {
         libexample
-            .get::<extern "C" fn()>("c_fun_print_something_else")
+            .get::<fn(&str)>("print")
             .unwrap()
     };
-    f();
+    f("dlopen-rs: hello world!");
 }
 ```
+### Example 2
+Set the path to load the dynamic library:
+```shell
+export RUST_LD_LIBRARY_PATH=/lib32
+```
+Load dynamic libraries using the dlopen interface:
+```Rust
+use dlopen_rs::ELFLibrary;
+use std::path::Path;
+
+fn main() {
+    let path = Path::new("./target/release/libexample.so");
+    let libexample = ELFLibrary::dlopen(path).unwrap();
+    let add = unsafe { libexample.get::<fn(i32, i32) -> i32>("add").unwrap() };
+    println!("{}", add(1, 1));
+
+    let print = unsafe { libexample.get::<fn(&str)>("print").unwrap() };
+    print("dlopen-rs: hello world");
+}
+```
+
 ## NOTE
 If you encounter any issues while using it or need any new features, feel free to raise an issue on GitHub. 
-https://github.com/weizhiao/dlopen-rs

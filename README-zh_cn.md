@@ -25,6 +25,8 @@
 | libunwind | 否           | 如果程序使用 libunwind 处理异常，启用此特性。                                                      |
 ## 示例
 
+### 示例1
+细粒度地控制动态库的加载流程
 ```rust
 use dlopen_rs::ELFLibrary;
 use nix::libc::size_t;
@@ -49,15 +51,42 @@ fn main() {
             }
         })
         .unwrap();
-    let f = unsafe {
+    let add = unsafe {
         libexample
-            .get:: i32>("c_fun_add_two")
+            .get::<fn(i32, i32) -> i32>("add")
             .unwrap()
     };
-    println!("{}", f(2));
+    println!("{}", f(1,1));
 
+    let print = unsafe {
+        libexample
+            .get::<fn(&str)>("print")
+            .unwrap()
+    };
+    f("dlopen-rs: hello world!");
 }
 ```
+### 示例2
+设置加载动态库的路径:
+```shell
+export RUST_LD_LIBRARY_PATH=/lib32
+```
+使用dlopen接口加载动态库:
+```Rust
+use dlopen_rs::ELFLibrary;
+use std::path::Path;
+
+fn main() {
+    let path = Path::new("./target/release/libexample.so");
+    let libexample = ELFLibrary::dlopen(path).unwrap();
+    let add = unsafe { libexample.get::<fn(i32, i32) -> i32>("add").unwrap() };
+    println!("{}", add(1, 1));
+
+    let print = unsafe { libexample.get::<fn(&str)>("print").unwrap() };
+    print("dlopen-rs: hello world");
+}
+```
+
 ## 补充
 
 如果您在使用过程中遇到任何问题或需要任何新特性，请随时在 GitHub 上提出问题。

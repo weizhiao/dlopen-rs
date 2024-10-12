@@ -13,31 +13,18 @@ fn main() {
 
     libexample.register();
 
+    let add = unsafe { libexample.get::<fn(i32, i32) -> i32>("add").unwrap() };
+    println!("{}", add(1, 1));
 
-    let f = unsafe {
-        libexample
-            .get::<extern "C" fn(i32) -> i32>("c_fun_add_two")
-            .unwrap()
-    };
-    println!("{}", f(2));
+    let print = unsafe { libexample.get::<fn(&str)>("print").unwrap() };
+    print("dlopen-rs: hello world");
 
-    let f = unsafe {
-        libexample
-            .get::<extern "C" fn()>("c_fun_print_something_else")
-            .unwrap()
-    };
-    f();
+    let thread_local = unsafe { libexample.get::<fn()>("thread_local").unwrap() };
+    thread_local();
 
-    let f = unsafe {
-        libexample
-            .get::<extern "C" fn()>("c_func_thread_local")
-            .unwrap()
-    };
-    f();
+    let panic = unsafe { libexample.get::<fn()>("panic").unwrap() };
+    panic();
 
-    let f = unsafe { libexample.get::<extern "C" fn()>("c_func_panic").unwrap() };
-    f();
-
-    let f = unsafe { libexample.get::<extern "C" fn()>("backtrace").unwrap() };
-    f();
+    let backtrace = unsafe { libexample.get::<fn()>("backtrace").unwrap() };
+    backtrace();
 }
