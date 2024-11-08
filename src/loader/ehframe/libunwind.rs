@@ -1,7 +1,7 @@
 use core::ffi::c_void;
 
 use crate::{
-    loader::{arch::Phdr, dso::segment::ELFSegments},
+    loader::{arch::Phdr, segment::ELFSegments},
     Result,
 };
 #[derive(Debug)]

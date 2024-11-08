@@ -1,274 +1,507 @@
 mod arch;
-mod builtin;
-#[cfg(feature = "debug")]
-pub(crate) mod debug;
-pub mod dso;
-#[cfg(feature = "ldso")]
-mod ldso;
-mod relocation;
+mod binary;
+mod dynamic;
+mod ehframe;
+#[cfg(feature = "std")]
+mod file;
+pub mod mmap;
+mod segment;
+mod symbol;
+#[cfg(feature = "tls")]
+mod tls;
+mod types;
+#[cfg(feature = "version")]
+mod version;
 
-use core::{
-    ffi::CStr,
-    fmt::Debug,
-    marker::{self, PhantomData},
-    ops,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use crate::{parse_dynamic_error, relocation::UserData, unlikely, RelocatedLibrary, Result};
+use alloc::ffi::CString;
+use alloc::vec::Vec;
+use arch::{Phdr, Rela};
+use binary::ELFBinary;
+use core::{fmt::Debug, ops::Range};
+use ehframe::EhFrame;
+use elf::abi::*;
+use mmap::{Mmap, RawData};
+use segment::{ELFRelro, ELFSegments, MASK, PAGE_SIZE};
 
-use alloc::{ffi::CString, format, sync::Arc, vec::Vec};
-use dso::{
-    symbol::{SymbolData, SymbolInfo},
-    ExtraData,
-};
+pub(crate) use arch::*;
+pub(crate) use dynamic::ELFRawDynamic;
+pub(crate) use symbol::{SymbolData, SymbolInfo};
+#[cfg(feature = "tls")]
+pub(crate) use tls::tls_get_addr;
+#[cfg(feature = "version")]
+pub(crate) use version::SymbolVersion;
 
-use crate::{find_symbol_error, Result};
-pub use dso::ELFLibrary;
-
-#[allow(unused)]
-#[derive(Debug)]
-enum LibraryExtraData {
-    Internal(ExtraData),
-    #[cfg(feature = "ldso")]
-    External(ldso::ExtraData),
+pub(crate) struct ELFRelocation {
+    pub(crate) pltrel: Option<&'static [Rela]>,
+    pub(crate) rel: Option<&'static [Rela]>,
 }
 
-impl Drop for LibraryExtraData {
-    fn drop(&mut self) {
-        #[allow(irrefutable_let_patterns)]
-        if let LibraryExtraData::Internal(extra) = self {
-            if let Some(fini) = extra.fini_fn() {
-                fini();
-            }
-            if let Some(fini_array) = extra.fini_array_fn() {
-                for fini in fini_array {
-                    fini();
-                }
-            }
+#[allow(unused)]
+pub(crate) struct ExtraData {
+    /// phdrs
+    #[cfg(feature = "std")]
+    phdrs: Option<&'static [Phdr]>,
+    /// .eh_frame
+    unwind: Option<EhFrame>,
+    /// semgents
+    segments: ELFSegments,
+    /// .fini
+    fini_fn: Option<extern "C" fn()>,
+    /// .fini_array
+    fini_array_fn: Option<&'static [extern "C" fn()]>,
+    /// .tbss and .tdata
+    #[cfg(feature = "tls")]
+    tls: Option<Box<tls::ELFTLS>>,
+    /// user data
+    user_data: Option<UserData>,
+    /// dependency libraries
+    dep_libs: Option<Vec<RelocatedLibrary>>,
+}
+
+impl Debug for ExtraData {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut binding = f.debug_struct("ExtraData");
+        let f = binding.field("segments", &self.segments);
+        if let Some(dep_libs) = &self.dep_libs {
+            f.field("dep_libs", dep_libs);
         }
+        f.finish()
+    }
+}
+
+impl ExtraData {
+    #[cfg(feature = "std")]
+    pub(crate) fn phdrs(&self) -> Option<&[Phdr]> {
+        self.phdrs
+    }
+
+    #[inline]
+    pub(crate) fn base(&self) -> usize {
+        self.segments.base()
+    }
+
+    #[inline]
+    #[cfg(feature = "tls")]
+    pub(crate) fn tls(&self) -> Option<*const tls::ELFTLS> {
+        self.tls.as_ref().map(|val| val.as_ref() as _)
+    }
+
+    #[inline]
+    pub(crate) fn set_user_data(&mut self, user_data: UserData) {
+        self.user_data = Some(user_data);
+    }
+
+    #[inline]
+    pub(crate) fn set_dep_libs(&mut self, dep_libs: Vec<RelocatedLibrary>) {
+        self.dep_libs = Some(dep_libs);
+    }
+
+    #[inline]
+    pub(crate) fn get_dep_libs(&self) -> Option<&Vec<RelocatedLibrary>> {
+        self.dep_libs.as_ref()
+    }
+
+    pub(crate) fn fini_fn(&self) -> Option<extern "C" fn()> {
+        self.fini_fn
+    }
+
+    pub(crate) fn fini_array_fn(&self) -> Option<&[extern "C" fn()]> {
+        self.fini_array_fn
     }
 }
 
 #[allow(unused)]
-pub(crate) struct RelocatedLibraryInner {
-    name: CString,
-    base: usize,
-    symbols: SymbolData,
-    #[cfg(feature = "tls")]
-    tls: Option<usize>,
+pub(crate) struct ELFLibraryInner {
+    /// file name
+    pub(crate) name: CString,
+    /// elf symbols
+    pub(crate) symbols: SymbolData,
+    /// debug link map
     #[cfg(feature = "debug")]
-    link_map: debug::DebugInfo,
-    extra: LibraryExtraData,
+    pub(crate) link_map: super::debug::DebugInfo,
+    /// extra elf data
+    pub(crate) extra: ExtraData,
+    /// rela.dyn and rela.plt
+    relocation: ELFRelocation,
+    /// GNU_RELRO segment
+    relro: Option<ELFRelro>,
+    /// .init
+    init_fn: Option<extern "C" fn()>,
+    /// .init_array
+    init_array_fn: Option<&'static [extern "C" fn()]>,
+    /// needed libs' name
+    needed_libs: Vec<&'static str>,
 }
 
-impl Debug for RelocatedLibraryInner {
+impl Debug for ELFLibraryInner {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("RelocatedLibrary")
+        f.debug_struct("ELFLibrary")
             .field("name", &self.name)
-            .field("base", &self.base)
             .field("extra", &self.extra)
+            .field("needed_libs", &self.needed_libs)
             .finish()
     }
 }
 
-impl RelocatedLibraryInner {
-    #[inline]
-    pub(crate) fn symbols(&self) -> &SymbolData {
-        &self.symbols
-    }
-
-    #[cfg(feature = "tls")]
-    pub(crate) fn tls(&self) -> Option<usize> {
-        self.tls
-    }
+pub struct ELFLibrary {
+    pub(crate) inner: ELFLibraryInner,
 }
 
-#[derive(Clone)]
-pub struct RelocatedLibrary {
-    pub(crate) inner: Arc<(AtomicBool, RelocatedLibraryInner)>,
-}
-
-impl Debug for RelocatedLibrary {
+impl Debug for ELFLibrary {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        self.inner().fmt(f)
+        self.inner.fmt(f)
     }
 }
 
-unsafe impl Send for RelocatedLibrary {}
-unsafe impl Sync for RelocatedLibrary {}
-
-impl RelocatedLibrary {
-    /// Retrieves the list of dependent libraries.
+impl ELFLibrary {
+    /// Find and load a elf dynamic library from path.
     ///
-    /// This method returns an optional reference to a vector of `RelocatedLibrary` instances,
-    /// which represent the libraries that the current dynamic library depends on.
+    /// The `filename` argument may be either:
     ///
+    /// * A library filename;
+    /// * The absolute path to the library;
+    /// * A relative (to the current working directory) path to the library.
     /// # Examples
     ///
-    /// ```no_run
-    /// if let Some(dependencies) = library.dep_libs() {
-    ///     for lib in dependencies {
-    ///         println!("Dependency: {:?}", lib);
-    ///     }
-    /// } else {
-    ///     println!("No dependencies found.");
-    /// }
-    /// ```
-    pub fn dep_libs(&self) -> Option<&Vec<RelocatedLibrary>> {
-        match &self.inner().extra {
-            LibraryExtraData::Internal(extra_data) => extra_data.get_dep_libs(),
-            #[cfg(feature = "ldso")]
-            LibraryExtraData::External(_) => None,
-        }
-    }
-
-    /// Retrieves the name of the dynamic library.
-    ///
-    /// This method returns a string slice that represents the name of the dynamic library.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// let library_name = library.name();
-    /// println!("The dynamic library name is: {}", library_name);
-    /// ```
-    pub fn name(&self) -> &str {
-        self.inner().name.to_str().unwrap()
-    }
-
-    pub fn cname(&self) -> &CStr {
-        &self.inner().name
-    }
-
-    #[allow(unused)]
-    pub(crate) fn is_register(&self) -> bool {
-        self.inner.0.load(Ordering::Relaxed)
-    }
-
-    #[allow(unused)]
-    pub(crate) fn set_register(&self) {
-        self.inner.0.store(true, Ordering::Relaxed);
-    }
-
-    #[cfg(feature = "std")]
-    pub(crate) fn get_extra_data(&self) -> Option<&ExtraData> {
-        match &self.inner().extra {
-            LibraryExtraData::Internal(lib) => Some(lib),
-            #[cfg(feature = "ldso")]
-            LibraryExtraData::External(_) => None,
-        }
-    }
-
-    pub(crate) fn inner(&self) -> &RelocatedLibraryInner {
-        &self.inner.1
-    }
-
-    pub fn base(&self) -> usize {
-        self.inner().base
-    }
-
-    /// Get a pointer to a function or static variable by symbol name.
-    ///
-    /// The symbol is interpreted as-is; no mangling is done. This means that symbols like `x::y` are
-    /// most likely invalid.
-    ///
-    /// # Safety
-    ///
-    /// Users of this API must specify the correct type of the function or variable loaded.
-    ///
-    ///
-    /// # Examples
-    ///
-    /// Given a loaded library:
     ///
     /// ```no_run
     /// # use ::dlopen_rs::ELFLibrary;
     /// let lib = ELFLibrary::from_file("/path/to/awesome.module")
-    ///		.unwrap()
-    ///		.relocate(&[])
     ///		.unwrap();
     /// ```
     ///
-    /// Loading and using a function looks like this:
-    ///
-    /// ```no_run
-    /// unsafe {
-    ///     let awesome_function: Symbol<unsafe extern fn(f64) -> f64> =
-    ///         lib.get("awesome_function").unwrap();
-    ///     awesome_function(0.42);
-    /// }
-    /// ```
-    ///
-    /// A static variable may also be loaded and inspected:
-    ///
-    /// ```no_run
-    /// unsafe {
-    ///     let awesome_variable: Symbol<*mut f64> = lib.get("awesome_variable").unwrap();
-    ///     **awesome_variable = 42.0;
-    /// };
-    /// ```
-    pub unsafe fn get<'lib, T>(&'lib self, name: &str) -> Result<Symbol<'lib, T>> {
-        self.inner()
-            .symbols()
-            .get_sym(&SymbolInfo::new(name))
-            .map(|sym| Symbol {
-                ptr: (self.base() + sym.st_value as usize) as _,
-                pd: PhantomData,
-            })
-            .ok_or(find_symbol_error(format!("can not find symbol:{}", name)))
+    #[cfg(feature = "std")]
+    pub fn from_file<M: Mmap>(path: impl AsRef<std::ffi::OsStr>) -> Result<Self> {
+        let file_name = path.as_ref().to_str().unwrap();
+        let file = std::fs::File::open(path.as_ref())?;
+        let mut file = file::ELFFile::new(file);
+        let inner = file.load::<M>(CString::new(file_name).unwrap())?;
+        Ok(ELFLibrary { inner })
     }
 
-    /// Attempts to load a versioned symbol from the dynamically-linked library.
+    /// Creates a new `ELFLibrary` instance from an open file handle.
     ///
-    /// # Safety
-    /// This function is unsafe because it involves raw pointer manipulation and
-    /// dereferencing. The caller must ensure that the library handle is valid
-    /// and that the symbol exists and has the correct type.
+    /// # Features
+    /// This function is only available when the "std" feature is enabled. The "std"
+    /// feature must be specified in the dependency section of the Cargo.toml file.
     ///
     /// # Parameters
-    /// - `&'lib self`: A reference to the library instance from which the symbol will be loaded.
-    /// - `name`: The name of the symbol to load.
-    /// - `version`: The version of the symbol to load.
+    /// - `file`: A open file handle (`std::fs::File`). The file must point to a valid ELF binary.
+    /// - `name`: An object that can be converted into a `String`, typically a `&str`, which represents the library name.
     ///
     /// # Returns
-    /// If the symbol is found and has the correct type, this function returns
-    /// `Ok(Symbol<'lib, T>)`, where `Symbol` is a wrapper around a raw function pointer.
-    /// If the symbol cannot be found or an error occurs, it returns an `Err` with a message.
+    /// This function returns a `Result` containing an `ELFLibrary` instance if successful.
+    /// If the file is not a valid ELF binary or cannot be loaded, it returns an `Err` containing an error.
+    ///
+    /// # Safety
+    /// This function is safe to call, but the resulting `ELFLibrary` instance should be used
+    /// carefully, as incorrect usage may lead to undefined behavior.
     ///
     /// # Examples
     /// ```
-    /// let symbol = unsafe { lib.get_version::<fn()>>("function_name", "1.0").unwrap() };
+    /// use std::fs::File;
+    /// use dlopen_rs::ELFLibrary;
+    ///
+    /// let file = File::open("path_to_elf").unwrap();
+    /// let lib = ELFLibrary::from_open_file(file, "my_elf_library").unwrap();
     /// ```
     ///
     /// # Errors
-    /// Returns a custom error if the symbol cannot be found, or if there is a problem
-    /// retrieving the symbol.
-    #[cfg(feature = "version")]
-    pub unsafe fn get_version<'lib, T>(
-        &'lib self,
-        name: &str,
-        version: &str,
-    ) -> Result<Symbol<'lib, T>> {
-        let version = dso::version::SymbolVersion::new(version);
-        self.inner()
-            .symbols()
-            .get_sym(&SymbolInfo::new_with_version(name, version))
-            .map(|sym| Symbol {
-                ptr: (self.base() + sym.st_value as usize) as _,
-                pd: PhantomData,
-            })
-            .ok_or(find_symbol_error(format!("can not find symbol:{}", name)))
+    /// Returns an error if the ELF file cannot be loaded or if there is an issue with the file handle.
+    #[cfg(feature = "std")]
+    pub fn from_open_file<M: Mmap>(
+        file: std::fs::File,
+        name: impl AsRef<str>,
+    ) -> Result<ELFLibrary> {
+        let mut file = file::ELFFile::new(file);
+        let inner = file.load::<M>(CString::new(name.as_ref()).unwrap())?;
+        Ok(ELFLibrary { inner })
+    }
+
+    /// load a elf dynamic library from bytes
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use ::dlopen_rs::ELFLibrary;
+    /// let path = Path::new("/path/to/awesome.module");
+    /// let bytes = std::fs::read(path).unwrap();
+    /// let lib = ELFLibrary::from_binary(&bytes).unwarp();
+    /// ```
+    pub fn from_binary<M: Mmap>(bytes: &[u8], name: impl AsRef<str>) -> Result<Self> {
+        let mut file = ELFBinary::new(bytes);
+        let inner = file.load::<M>(CString::new(name.as_ref()).unwrap())?;
+        Ok(ELFLibrary { inner })
+    }
+
+    /// get the name of the dependent libraries
+    pub fn needed_libs(&self) -> &Vec<&str> {
+        &self.inner.needed_libs
+    }
+
+    #[inline]
+    pub(crate) fn extra_data(&self) -> &ExtraData {
+        &self.inner.extra
+    }
+
+    #[inline]
+    pub(crate) fn relocation(&self) -> &ELFRelocation {
+        &self.inner.relocation
+    }
+
+    pub(crate) fn relro(&self) -> &Option<ELFRelro> {
+        &self.inner.relro
+    }
+
+    #[inline]
+    pub(crate) fn init_fn(&self) -> &Option<extern "C" fn()> {
+        &self.inner.init_fn
+    }
+
+    #[inline]
+    pub(crate) fn init_array_fn(&self) -> &Option<&'static [extern "C" fn()]> {
+        &self.inner.init_array_fn
+    }
+
+    pub(crate) fn symbols(&self) -> &SymbolData {
+        &self.inner.symbols
+    }
+
+    pub(crate) fn name(&self) -> &str {
+        self.inner.name.to_str().unwrap()
+    }
+
+    #[inline]
+    pub(crate) fn set_user_data(&mut self, user_data: UserData) {
+        self.inner.extra.set_user_data(user_data);
+    }
+
+    #[inline]
+    pub(crate) fn set_dep_libs(&mut self, dep_libs: Vec<RelocatedLibrary>) {
+        self.inner.extra.set_dep_libs(dep_libs);
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Symbol<'lib, T: 'lib> {
-    ptr: *mut (),
-    pd: marker::PhantomData<&'lib T>,
+/// a dynamic shared object
+pub(crate) trait SharedObject: MapSegment {
+    /// validate ehdr and get phdrs
+    fn parse_ehdr(&mut self) -> crate::Result<(Range<usize>, Vec<u8>)>;
+    fn load<M: Mmap>(&mut self, name: CString) -> Result<ELFLibraryInner> {
+        let (phdr_range, phdrs) = self.parse_ehdr()?;
+        debug_assert_eq!(phdrs.len() % PHDR_SIZE, 0);
+        let phdrs = unsafe {
+            core::slice::from_raw_parts(phdrs.as_ptr().cast::<Phdr>(), phdrs.len() / PHDR_SIZE)
+        };
+
+        let mut min_vaddr = usize::MAX;
+        let mut max_vaddr = 0;
+        // 最小偏移地址对应内容在文件中的偏移
+        let mut min_off = 0;
+        let mut min_size = 0;
+        let mut min_prot = 0;
+
+        //找到最小的偏移地址和最大的偏移地址
+        for phdr in phdrs.iter() {
+            if phdr.p_type == PT_LOAD {
+                let vaddr_start = phdr.p_vaddr as usize;
+                let vaddr_end = (phdr.p_vaddr + phdr.p_memsz) as usize;
+                if vaddr_start < min_vaddr {
+                    min_vaddr = vaddr_start;
+                    min_off = phdr.p_offset as usize;
+                    min_prot = phdr.p_flags;
+                    min_size = phdr.p_filesz as usize;
+                }
+                if vaddr_end > max_vaddr {
+                    max_vaddr = vaddr_end;
+                }
+            }
+        }
+
+        // 按页对齐
+        max_vaddr = (max_vaddr + PAGE_SIZE - 1) & MASK;
+        min_vaddr &= MASK as usize;
+
+        let total_size = max_vaddr - min_vaddr;
+        // 创建加载动态库所需的空间，并同时映射min_vaddr对应的segment
+        let segments =
+            Self::create_segments::<M>(self, min_vaddr, total_size, min_off, min_size, min_prot)?;
+        // 获取基地址
+        let base = segments.base();
+        let mut unwind = None;
+        let mut dynamics = None;
+        let mut relro = None;
+        #[cfg(feature = "tls")]
+        let mut tls = None;
+        let mut loaded_phdrs: Option<&[Phdr]> = None;
+
+        // 根据Phdr的类型进行不同操作
+        for phdr in phdrs {
+            match phdr.p_type {
+                // 将segment加载到内存中
+                PT_LOAD => self.load_segment::<M>(&segments, phdr)?,
+                // 解析.dynamic section
+                PT_DYNAMIC => {
+                    dynamics = Some(ELFRawDynamic::new((phdr.p_vaddr as usize + base) as _)?)
+                }
+                PT_GNU_EH_FRAME => unwind = Some(EhFrame::new(phdr, &segments)?),
+                PT_GNU_RELRO => relro = Some(ELFRelro::new::<M>(phdr, segments.base())),
+                #[cfg(feature = "tls")]
+                PT_TLS => tls = Some(unsafe { tls::ELFTLS::new(phdr, &segments)? }),
+                PT_PHDR => {
+                    loaded_phdrs = Some(unsafe {
+                        core::slice::from_raw_parts(
+                            segments.as_mut_ptr().add(phdr.p_vaddr as _).cast(),
+                            phdr.p_memsz as usize / size_of::<Phdr>(),
+                        )
+                    })
+                }
+                _ => {}
+            }
+        }
+
+        loaded_phdrs.or_else(|| {
+            for phdr in phdrs {
+                let cur_range = phdr.p_offset as usize..(phdr.p_offset + phdr.p_filesz) as usize;
+                if cur_range.contains(&phdr_range.start) && cur_range.contains(&phdr_range.end) {
+                    return Some(unsafe {
+                        core::slice::from_raw_parts(
+                            segments
+                                .as_mut_ptr()
+                                .add(phdr_range.start - cur_range.start)
+                                .cast(),
+                            (cur_range.end - cur_range.start) / size_of::<Phdr>(),
+                        )
+                    });
+                }
+            }
+            None
+        });
+
+        let dynamics = dynamics
+            .ok_or(parse_dynamic_error("elf file does not have dynamic"))?
+            .finish(base);
+        let relocation = ELFRelocation {
+            pltrel: dynamics.pltrel(),
+            rel: dynamics.rela(),
+        };
+        #[cfg(feature = "debug")]
+        let link_map =
+            unsafe { crate::debug::dl_debug_init(segments.base(), name.as_ptr(), dynamics.addr()) };
+        let symbols = SymbolData::new(
+            dynamics.hashtab(),
+            dynamics.symtab(),
+            dynamics.strtab(),
+            dynamics.strtab_size(),
+            #[cfg(feature = "version")]
+            dynamics.version_idx().map(|version_idx| version_idx + base),
+            #[cfg(feature = "version")]
+            dynamics.verneed().map(|(off, num)| (off + base, num)),
+            #[cfg(feature = "version")]
+            dynamics.verdef().map(|(off, num)| (off + base, num)),
+        );
+        let needed_libs: Vec<&'static str> = dynamics
+            .needed_libs()
+            .iter()
+            .map(|needed_lib| symbols.strtab().get(*needed_lib))
+            .collect();
+        let elf_lib = ELFLibraryInner {
+            name,
+            symbols,
+            #[cfg(feature = "debug")]
+            link_map,
+            extra: ExtraData {
+                #[cfg(feature = "std")]
+                phdrs: loaded_phdrs,
+                unwind,
+                segments,
+                fini_fn: dynamics.fini_fn(),
+                fini_array_fn: dynamics.fini_array_fn(),
+                #[cfg(feature = "tls")]
+                tls,
+                user_data: None,
+                dep_libs: None,
+            },
+            relro,
+            relocation,
+            init_fn: dynamics.init_fn(),
+            init_array_fn: dynamics.init_array_fn(),
+            needed_libs,
+        };
+        Ok(elf_lib)
+    }
 }
 
-impl<'lib, T> ops::Deref for Symbol<'lib, T> {
-    type Target = T;
-    fn deref(&self) -> &T {
-        unsafe { &*(&self.ptr as *const *mut _ as *const T) }
+pub(crate) trait MapSegment: RawData {
+    fn create_segments<M: Mmap>(
+        &self,
+        min_vaddr: usize,
+        total_size: usize,
+        offset: usize,
+        len: usize,
+        prot: u32,
+    ) -> crate::Result<ELFSegments> {
+        let memory = unsafe {
+            M::mmap(
+                None,
+                total_size,
+                ELFSegments::map_prot(prot),
+                mmap::MapFlags::MAP_PRIVATE,
+                self.transport(offset, len),
+            )?
+        };
+        Ok(ELFSegments::new::<M>(
+            memory,
+            -(min_vaddr as isize),
+            total_size,
+        ))
+    }
+
+    fn load_segment<M: Mmap>(&self, segments: &ELFSegments, phdr: &Phdr) -> crate::Result<()> {
+        // 映射的起始地址与结束地址都是页对齐的
+        let addr_min = (-segments.offset()) as usize;
+        let base = segments.base();
+        let min_vaddr = phdr.p_vaddr as usize & MASK;
+        let max_vaddr = (phdr.p_vaddr as usize + phdr.p_memsz as usize + PAGE_SIZE - 1) & MASK;
+        let memsz = max_vaddr - min_vaddr;
+        let prot = ELFSegments::map_prot(phdr.p_flags);
+        let real_addr = min_vaddr + base;
+        let offset = phdr.p_offset as usize;
+        let filesz = phdr.p_filesz as usize;
+        // 将类似bss节的内存区域的值设置为0
+        if addr_min != min_vaddr {
+            let _ = unsafe {
+                M::mmap(
+                    Some(real_addr),
+                    memsz,
+                    prot,
+                    mmap::MapFlags::MAP_PRIVATE | mmap::MapFlags::MAP_FIXED,
+                    self.transport(offset, filesz),
+                )?
+            };
+            //将类似bss节的内存区域的值设置为0
+            if unlikely(phdr.p_filesz != phdr.p_memsz) {
+                // 用0填充这一页
+                let zero_start = (phdr.p_vaddr + phdr.p_filesz) as usize;
+                let zero_end = (zero_start + PAGE_SIZE - 1) & MASK;
+                let zero_mem = &mut segments.as_mut_slice()[zero_start..zero_end];
+                zero_mem.fill(0);
+
+                if zero_end < max_vaddr {
+                    //之后剩余的一定是页的整数倍
+                    //如果有剩余的页的话，将其映射为匿名页
+                    let zero_mmap_addr = base + zero_end;
+                    let zero_mmap_len = max_vaddr - zero_end;
+                    unsafe {
+                        M::mmap_anonymous(
+                            zero_mmap_addr,
+                            zero_mmap_len,
+                            prot,
+                            mmap::MapFlags::MAP_PRIVATE | mmap::MapFlags::MAP_FIXED,
+                        )?;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }

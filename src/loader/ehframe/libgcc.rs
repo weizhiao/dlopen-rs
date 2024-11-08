@@ -1,5 +1,5 @@
 use crate::{
-    loader::{arch::Phdr, dso::segment::ELFSegments},
+    loader::{arch::Phdr, segment::ELFSegments},
     Result,
 };
 use core::ffi::c_void;

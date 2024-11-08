@@ -22,7 +22,7 @@ impl Mmap for MmapImpl {
         todo!()
     }
 
-    unsafe fn mummap(addr: core::ptr::NonNull<core::ffi::c_void>, len: usize) -> crate::Result<()> {
+    unsafe fn munmap(addr: core::ptr::NonNull<core::ffi::c_void>, len: usize) -> crate::Result<()> {
         todo!()
     }
 

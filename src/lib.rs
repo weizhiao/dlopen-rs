@@ -33,17 +33,25 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 extern crate alloc;
 
+mod builtin;
+#[cfg(feature = "debug")]
+mod debug;
 #[cfg(feature = "std")]
 mod dlopen;
+#[cfg(feature = "ldso")]
+mod ldso;
 mod loader;
 #[cfg(feature = "std")]
 mod register;
+mod relocation;
+mod types;
 
 use alloc::string::{String, ToString};
 pub use loader::{
-    dso::mmap::{MapFlags, Mmap, MmapImpl, Offset, OffsetType, ProtFlags},
-    ELFLibrary, RelocatedLibrary, Symbol,
+    mmap::{MapFlags, Mmap, MmapImpl, Offset, OffsetType, ProtFlags},
+    ELFLibrary,
 };
+pub use types::{RelocatedLibrary, Symbol};
 
 #[cfg(not(feature = "nightly"))]
 use core::convert::identity as unlikely;

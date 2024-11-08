@@ -1,7 +1,7 @@
 use core::ffi::c_int;
 
 #[cfg(feature = "tls")]
-use super::dso::tls::tls_get_addr;
+use super::loader::tls_get_addr;
 #[cfg(feature = "std")]
 use crate::register::dl_iterate_phdr_impl;
 

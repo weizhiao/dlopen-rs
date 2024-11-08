@@ -1,5 +1,7 @@
-use super::{arch::*, builtin::BUILTIN, dso::ELFLibrary};
+use crate::builtin::BUILTIN;
+use crate::loader::*;
 use crate::relocate_error;
+use crate::ELFLibrary;
 use crate::RelocatedLibrary;
 use crate::Result;
 use alloc::boxed::Box;

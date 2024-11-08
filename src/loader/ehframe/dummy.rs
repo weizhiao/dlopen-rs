@@ -1,5 +1,5 @@
 use crate::{
-    loader::{arch::Phdr, dso::segment::ELFSegments},
+    loader::{segment::ELFSegments, Phdr},
     Result,
 };
 

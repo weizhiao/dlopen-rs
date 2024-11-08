@@ -1,9 +1,9 @@
-use super::{
-    arch::Dyn,
-    dso::{dynamic::ELFRawDynamic, symbol::SymbolData},
-    ELFLibrary, LibraryExtraData, RelocatedLibraryInner,
+use crate::{
+    find_lib_error,
+    loader::{Dyn, ELFRawDynamic, SymbolData},
+    types::{LibraryExtraData, RelocatedLibraryInner},
+    ELFLibrary, RelocatedLibrary, Result,
 };
-use crate::{find_lib_error, RelocatedLibrary, Result};
 use core::{ffi::c_char, fmt::Debug, mem::MaybeUninit, sync::atomic::AtomicBool};
 use nix::libc::{dlclose, dlinfo, dlopen, RTLD_DI_LINKMAP, RTLD_LOCAL, RTLD_NOW};
 use std::{

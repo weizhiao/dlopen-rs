@@ -89,7 +89,7 @@ impl ELFSegments {
             offset,
             len,
             munmap: Box::new(|addr, len: usize| unsafe {
-                M::mummap(addr, len).unwrap();
+                M::munmap(addr, len).unwrap();
             }),
         }
     }

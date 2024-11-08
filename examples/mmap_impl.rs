@@ -24,7 +24,7 @@ impl Mmap for MyMmapImpl {
         todo!()
     }
 
-    unsafe fn mummap(
+    unsafe fn munmap(
         addr: std::ptr::NonNull<std::ffi::c_void>,
         len: usize,
     ) -> dlopen_rs::Result<()> {

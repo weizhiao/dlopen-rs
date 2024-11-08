@@ -23,11 +23,11 @@ fn main() {
         })
         .unwrap();
 
-    let f = unsafe { libexample.get::<fn(i32, i32) -> i32>("add").unwrap() };
-    println!("{}", f(1, 1));
+    let add = unsafe { libexample.get::<fn(i32, i32) -> i32>("add").unwrap() };
+    println!("{}", add(1, 1));
 
-    let f = unsafe { libexample.get::<fn(&str)>("print").unwrap() };
-    f("dlopen-rs: hello world");
+    let print = unsafe { libexample.get::<fn(&str)>("print").unwrap() };
+    print("dlopen-rs: hello world");
 
     let f = unsafe { libexample.get::<fn()>("thread_local").unwrap() };
     f();

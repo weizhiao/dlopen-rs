@@ -1,7 +1,7 @@
 use core::{ops::Range, sync::atomic::AtomicBool};
 
 use crate::{
-    loader::{arch::Phdr, dso::segment::ELFSegments},
+    loader::{arch::Phdr, segment::ELFSegments},
     Result,
 };
 

@@ -1,16 +1,10 @@
 use super::Mmap;
-use crate::loader::dso::PAGE_SIZE;
+use crate::loader::PAGE_SIZE;
 use alloc::alloc::{dealloc, handle_alloc_error};
 use core::{
     alloc::Layout,
-    mem::forget,
     ptr::NonNull,
     slice::{from_raw_parts, from_raw_parts_mut},
-};
-use std::{
-    fs::File,
-    io::{Read, Seek},
-    os::fd::FromRawFd,
 };
 
 pub struct MmapImpl;
@@ -24,7 +18,10 @@ impl Mmap for MmapImpl {
         offset: super::Offset,
     ) -> crate::Result<core::ptr::NonNull<core::ffi::c_void>> {
         match (offset.kind, addr) {
+            #[cfg(feature = "std")]
             (super::OffsetType::File { fd, file_offset }, None) => {
+                use std::io::{Read, Seek};
+                use std::os::fd::FromRawFd;
                 // 只有创建整个空间时会走这条路径
                 assert!((super::MapFlags::MAP_FIXED & flags).bits() == 0);
                 let total_size = len + PAGE_SIZE;
@@ -34,11 +31,11 @@ impl Mmap for MmapImpl {
                     handle_alloc_error(layout);
                 }
                 let dest = from_raw_parts_mut(memory.add(offset.offset), offset.len);
-                let mut file = File::from_raw_fd(fd);
+                let mut file = std::fs::File::from_raw_fd(fd);
                 file.seek(std::io::SeekFrom::Start(file_offset as _))?;
                 file.read_exact(dest)?;
                 // 防止提前关闭file
-                forget(file);
+                core::mem::forget(file);
                 //use this set prot to test no_mmap
                 // nix::sys::mman::mprotect(
                 //     std::ptr::NonNull::new_unchecked(memory as _),
@@ -50,15 +47,17 @@ impl Mmap for MmapImpl {
                 // .unwrap();
                 Ok(NonNull::new_unchecked(memory as _))
             }
+            #[cfg(feature = "std")]
             (super::OffsetType::File { fd, file_offset }, Some(addr)) => {
+                use std::io::{Read, Seek};
+                use std::os::fd::FromRawFd;
                 let ptr = addr as *mut u8;
-                println!("{:?}", ptr);
                 let dest = from_raw_parts_mut(ptr.add(offset.offset), offset.len);
-                let mut file = File::from_raw_fd(fd);
+                let mut file = std::fs::File::from_raw_fd(fd);
                 file.seek(std::io::SeekFrom::Start(file_offset as _))?;
                 file.read_exact(dest)?;
                 // 防止提前关闭file
-                forget(file);
+                core::mem::forget(file);
                 Ok(NonNull::new_unchecked(ptr as _))
             }
             (super::OffsetType::Addr(data_ptr), None) => {
@@ -107,7 +106,7 @@ impl Mmap for MmapImpl {
         Ok(NonNull::new_unchecked(ptr as _))
     }
 
-    unsafe fn mummap(addr: core::ptr::NonNull<core::ffi::c_void>, len: usize) -> crate::Result<()> {
+    unsafe fn munmap(addr: core::ptr::NonNull<core::ffi::c_void>, len: usize) -> crate::Result<()> {
         dealloc(
             addr.as_ptr() as _,
             Layout::from_size_align_unchecked(len, PAGE_SIZE),

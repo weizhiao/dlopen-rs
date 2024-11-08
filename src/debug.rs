@@ -1,9 +1,10 @@
-use super::arch::Dyn;
 use core::{
     ffi::{c_char, c_int, c_void},
     ptr::{addr_of_mut, null_mut},
 };
 use std::sync::{Mutex, Once};
+
+use crate::loader::Dyn;
 
 const RT_ADD: c_int = 1;
 const RT_CONSISTENT: c_int = 0;

@@ -1,5 +1,5 @@
 use super::Mmap;
-use crate::loader::dso::MASK;
+use crate::loader::MASK;
 use crate::Error;
 use core::slice::{from_raw_parts, from_raw_parts_mut};
 use core::{ffi::c_int, num::NonZeroUsize};
@@ -64,7 +64,7 @@ impl Mmap for MmapImpl {
         )?)
     }
 
-    unsafe fn mummap(addr: core::ptr::NonNull<core::ffi::c_void>, len: usize) -> crate::Result<()> {
+    unsafe fn munmap(addr: core::ptr::NonNull<core::ffi::c_void>, len: usize) -> crate::Result<()> {
         Ok(mman::munmap(addr, len)?)
     }
 

@@ -2,9 +2,9 @@ use super::mmap::OffsetType;
 use super::{
     mmap::{self, RawData},
     types::ELFEhdr,
-    MapSegment, Result, PHDR_SIZE,
+    MapSegment, Result,
 };
-use super::{SharedObject, MASK};
+use super::{SharedObject, MASK, PHDR_SIZE};
 use crate::loader::arch::EHDR_SIZE;
 use core::{mem::MaybeUninit, ops::Range};
 use std::os::fd::AsRawFd;

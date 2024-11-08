@@ -1,4 +1,5 @@
 use super::{symbol::ELFStringTable, SymbolData};
+use alloc::vec::Vec;
 use elf::abi;
 
 /// The special GNU extension section .gnu.version_d has a section type of SHT_GNU_VERDEF
@@ -267,7 +268,7 @@ impl ELFVersion {
         } else {
             return None;
         };
-        let mut versions = vec![];
+        let mut versions = Vec::new();
         //记录最大的verison idx
         let mut ndx_max = 0;
         if let Some((ptr, num)) = verdefs {
