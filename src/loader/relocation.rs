@@ -1,14 +1,12 @@
-use alloc::sync::Arc;
-use alloc::vec::Vec;
-use core::sync::atomic::AtomicBool;
-
-use super::ExternLibrary;
 use super::{arch::*, builtin::BUILTIN, dso::ELFLibrary};
 use crate::relocate_error;
 use crate::RelocatedLibrary;
 use crate::Result;
 use alloc::boxed::Box;
 use alloc::format;
+use alloc::sync::Arc;
+use alloc::vec::Vec;
+use core::sync::atomic::AtomicBool;
 use elf::abi::*;
 
 #[allow(unused)]
@@ -17,6 +15,23 @@ struct SymDef<'temp> {
     base: usize,
     #[cfg(feature = "tls")]
     tls: Option<usize>,
+}
+
+fn convert(symdef: Option<SymDef<'_>>) -> Option<*const ()> {
+    symdef.map(|symdef| {
+        if symdef.sym.st_info & 0xf != STT_GNU_IFUNC {
+            (symdef.base + symdef.sym.st_value as usize) as _
+        } else {
+            let ifunc: fn() -> usize =
+                unsafe { core::mem::transmute(symdef.base + symdef.sym.st_value as usize) };
+            ifunc() as _
+        }
+    })
+}
+
+pub(crate) struct UserData {
+    #[allow(unused)]
+    data: Box<dyn Fn(&str, Option<SymDef<'_>>) -> Option<*const ()> + 'static>,
 }
 
 impl ELFLibrary {
@@ -35,56 +50,10 @@ impl ELFLibrary {
     /// ```
     ///
     pub fn relocate(self, libs: impl Into<Vec<RelocatedLibrary>>) -> Result<RelocatedLibrary> {
-        self.relocate_impl(libs.into(), None)
-    }
-
-    /// Use both internal and external libraries to relocate the current library
-    /// # Examples
-    /// ```
-    ///#[derive(Debug, Clone)]
-    ///struct MyLib(Arc<Library>);
-    ///impl ExternLibrary for MyLib {
-    ///    fn get_sym(&self, name: &str) -> Option<*const ()> {
-    ///        let sym: Option<*const ()> = unsafe {
-    ///            self.0
-    ///                .get::<*const usize>(name.as_bytes())
-    ///                .map_or(None, |sym| Some(sym.into_raw().into_raw() as _))
-    ///        };
-    ///        sym
-    ///    }
-    ///}
-    ///let libc = MyLib(Arc::new(unsafe {
-    ///    Library::new("/lib/x86_64-linux-gnu/libc.so.6").unwrap()
-    ///}));
-    ///let libgcc = MyLib(Arc::new(unsafe {
-    ///    Library::new("/lib/x86_64-linux-gnu/libgcc_s.so.1").unwrap()
-    ///}));
-    ///let libexample = ELFLibrary::from_file("/path/to/awesome.module")
-    ///    .unwrap()
-    ///    .relocate_with(&[], vec![libc, libgcc])
-    ///    .unwrap();
-    /// ```
-    /// # Note
-    /// It will use extern_libs to relocate current lib firstly
-    pub fn relocate_with<T>(
-        self,
-        libs: impl Into<Vec<RelocatedLibrary>>,
-        extern_libs: Vec<T>,
-    ) -> Result<RelocatedLibrary>
-    where
-        T: ExternLibrary + 'static,
-    {
-        let func = move |name: &str| {
-            let mut symbol = None;
-            for lib in extern_libs.iter() {
-                if let Some(sym) = lib.get_sym(name) {
-                    symbol = Some(sym);
-                    break;
-                }
-            }
-            symbol
+        let find_symbol = move |name: &str, symdef: Option<SymDef<'_>>| -> Option<*const ()> {
+            BUILTIN.get(name).copied().or(convert(symdef))
         };
-        self.relocate_impl(libs.into(), Some(Box::new(func)))
+        self.relocate_impl(libs.into(), Box::new(find_symbol))
     }
 
     /// use internal libraries and function closure to relocate the current library
@@ -100,7 +69,7 @@ impl ELFLibrary {
     /// let libgcc = ELFLibrary::load_self("libgcc").unwrap();
     /// let lib = ELFLibrary::from_file("/path/to/awesome.module")
     /// 	.unwrap()
-    /// 	.relocate_with_func(&[libc, libgcc], |name| {
+    /// 	.relocate_with(&[libc, libgcc], |name| {
     ///         if name == "malloc" {
     ///	             return Some(mymalloc as _);
     ///         } else {
@@ -111,7 +80,7 @@ impl ELFLibrary {
     /// ```
     /// # Note
     /// It will use function closure to relocate current lib firstly
-    pub fn relocate_with_func<F>(
+    pub fn relocate_with<F>(
         self,
         libs: impl Into<Vec<RelocatedLibrary>>,
         func: F,
@@ -119,14 +88,20 @@ impl ELFLibrary {
     where
         F: Fn(&str) -> Option<*const ()> + 'static,
     {
-        let func = move |name: &str| func(name);
-        self.relocate_impl(libs.into(), Some(Box::new(func)))
+        let find_symbol = move |name: &str, symdef: Option<SymDef<'_>>| -> Option<*const ()> {
+            BUILTIN
+                .get(name)
+                .copied()
+                .or(func(name))
+                .or(convert(symdef))
+        };
+        self.relocate_impl(libs.into(), Box::new(find_symbol))
     }
 
     fn relocate_impl(
         mut self,
         libs: Vec<RelocatedLibrary>,
-        func: Option<Box<dyn Fn(&str) -> Option<*const ()> + 'static>>,
+        find_symbol: Box<dyn Fn(&str, Option<SymDef<'_>>) -> Option<*const ()> + 'static>,
     ) -> Result<RelocatedLibrary> {
         let iter = self
             .relocation()
@@ -140,35 +115,6 @@ impl ELFLibrary {
                 let rel_addr = (self.extra_data().base() + addr) as *mut usize;
                 rel_addr.write(symbol)
             };
-        };
-
-        let find_symbol = |name: &str, symdef: Option<SymDef<'_>>| -> Result<*const ()> {
-            BUILTIN
-                .get(name)
-                .copied()
-                .or_else(|| {
-                    if let Some(f) = func.as_ref() {
-                        return f(name);
-                    }
-                    None
-                })
-                .or_else(|| {
-                    symdef.map(|symdef| {
-                        if symdef.sym.st_info & 0xf != STT_GNU_IFUNC {
-                            (symdef.base + symdef.sym.st_value as usize) as _
-                        } else {
-                            let ifunc: fn() -> usize = unsafe {
-                                core::mem::transmute(symdef.base + symdef.sym.st_value as usize)
-                            };
-                            ifunc() as _
-                        }
-                    })
-                })
-                .ok_or(relocate_error(format!(
-                    "{}: can not find symbol {} in dependency libraries",
-                    self.name(),
-                    name
-                )))
         };
 
         for rela in iter {
@@ -215,7 +161,11 @@ impl ELFLibrary {
                 REL_NONE => {}
                 // REL_GOT/REL_JUMP_SLOT: S  REL_SYMBOLIC: S + A
                 REL_JUMP_SLOT | REL_GOT | REL_SYMBOLIC => {
-                    let symbol = find_symbol(name, symdef)?;
+                    let symbol = find_symbol(name, symdef).ok_or(relocate_error(format!(
+                        "{}: can not find symbol {} in dependency libraries",
+                        self.name(),
+                        name
+                    )))?;
                     write_val(
                         rela.r_offset as usize,
                         symbol as usize + rela.r_addend as usize,
@@ -283,7 +233,8 @@ impl ELFLibrary {
         if let Some(relro) = self.relro() {
             relro.relro()?;
         }
-        self.set_user_data(func);
+        let user_data = UserData { data: find_symbol };
+        self.set_user_data(user_data);
         self.set_dep_libs(libs);
         Ok(RelocatedLibrary {
             inner: Arc::new((AtomicBool::new(false), self.into())),

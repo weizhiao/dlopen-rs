@@ -17,7 +17,9 @@ pub(crate) struct EhFrame(usize);
 impl EhFrame {
     pub(crate) fn new(phdr: &Phdr, segments: &ELFSegments) -> Result<EhFrame> {
         let eh_frame_hdr = segments.base() + phdr.p_vaddr as usize;
-        Ok(EhFrame(eh_frame_hdr))
+        let unwind = EhFrame(eh_frame_hdr);
+        unwind.register_unwind(segments);
+        Ok(unwind)
     }
 }
 

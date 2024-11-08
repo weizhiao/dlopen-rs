@@ -78,7 +78,7 @@ Set the path to load the dynamic library:
 export RUST_LD_LIBRARY_PATH=/lib32
 ```
 Load dynamic libraries using the dlopen interface:
-```Rust
+```rust
 use dlopen_rs::ELFLibrary;
 use std::path::Path;
 

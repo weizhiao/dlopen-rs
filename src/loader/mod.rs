@@ -260,27 +260,6 @@ impl RelocatedLibrary {
     }
 }
 
-pub trait ExternLibrary {
-    /// Get the symbol of the dynamic library, and the return value is the address of the symbol
-    /// # Examples
-    ///
-    /// ```
-    /// #[derive(Debug, Clone)]
-    /// struct MyLib(Arc<Library>);
-    ///
-    /// impl ExternLibrary for MyLib {
-    /// 	fn get_sym(&self, name: &str) -> Option<*const ()> {
-    /// 		let sym: Option<*const ()> = unsafe {
-    ///  			self.0.get::<*const usize>(name.as_bytes())
-    ///				.map_or(None, |sym| Some(sym.into_raw().into_raw() as _))
-    ///			};
-    ///			sym
-    /// 	}
-    ///}
-    /// ```
-    fn get_sym(&self, name: &str) -> Option<*const ()>;
-}
-
 #[derive(Debug, Clone)]
 pub struct Symbol<'lib, T: 'lib> {
     ptr: *mut (),

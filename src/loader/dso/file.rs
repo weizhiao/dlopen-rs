@@ -1,19 +1,17 @@
+use super::mmap::OffsetType;
+use super::{
+    mmap::{self, RawData},
+    types::ELFEhdr,
+    MapSegment, Result, PHDR_SIZE,
+};
+use super::{SharedObject, MASK};
+use crate::loader::arch::EHDR_SIZE;
 use core::{mem::MaybeUninit, ops::Range};
+use std::os::fd::AsRawFd;
 use std::{
     fs::File,
     io::{Read, Seek, SeekFrom},
 };
-
-use crate::loader::arch::EHDR_SIZE;
-
-use super::{ehdr::ELFEhdr, Result, PHDR_SIZE};
-
-use super::SharedObject;
-
-#[cfg(feature = "mmap")]
-mod mmap;
-#[cfg(not(feature = "mmap"))]
-mod no_mmap;
 
 const BUF_SIZE: usize = EHDR_SIZE + 11 * PHDR_SIZE;
 
@@ -22,10 +20,25 @@ pub(crate) struct ELFFile {
 }
 
 impl ELFFile {
-    pub(crate) fn new(file: File) -> ELFFile {
+    pub(crate) fn new(file: File) -> Self {
         ELFFile { file }
     }
 }
+
+impl RawData for ELFFile {
+    fn transport(&self, offset: usize, len: usize) -> mmap::Offset {
+        mmap::Offset {
+            offset: offset - (offset & MASK),
+            len,
+            kind: OffsetType::File {
+                fd: self.file.as_raw_fd(),
+                file_offset: offset,
+            },
+        }
+    }
+}
+
+impl MapSegment for ELFFile {}
 
 impl SharedObject for ELFFile {
     fn parse_ehdr(&mut self) -> Result<(Range<usize>, Vec<u8>)> {

@@ -1,4 +1,4 @@
-use dlopen_rs::ELFLibrary;
+use dlopen_rs::{ELFLibrary, MmapImpl};
 use std::path::Path;
 
 fn main() {
@@ -6,7 +6,7 @@ fn main() {
     let libc = ELFLibrary::sys_load("libc.so.6").unwrap();
     let libgcc = ELFLibrary::sys_load("libgcc_s.so.1").unwrap();
 
-    let libexample = ELFLibrary::from_file(path)
+    let libexample = ELFLibrary::from_file::<MmapImpl>(path)
         .unwrap()
         .relocate(&[libc, libgcc])
         .unwrap();

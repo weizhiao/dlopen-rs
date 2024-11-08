@@ -40,7 +40,10 @@ mod loader;
 mod register;
 
 use alloc::string::{String, ToString};
-pub use loader::{ELFLibrary, ExternLibrary, RelocatedLibrary, Symbol};
+pub use loader::{
+    dso::mmap::{MapFlags, Mmap, MmapImpl, Offset, OffsetType, ProtFlags},
+    ELFLibrary, RelocatedLibrary, Symbol,
+};
 
 #[cfg(not(feature = "nightly"))]
 use core::convert::identity as unlikely;
@@ -63,9 +66,8 @@ pub enum Error {
     IOError {
         err: std::io::Error,
     },
-    #[cfg(feature = "mmap")]
     MmapError {
-        err: nix::Error,
+        msg: String,
     },
     #[cfg(any(feature = "libgcc", feature = "libunwind"))]
     GimliError {
@@ -98,8 +100,7 @@ impl Display for Error {
         match self {
             #[cfg(feature = "std")]
             Error::IOError { err } => write!(f, "{err}"),
-            #[cfg(feature = "mmap")]
-            Error::MmapError { err } => write!(f, "{err}"),
+            Error::MmapError { msg } => write!(f, "{msg}"),
             #[cfg(any(feature = "libgcc", feature = "libunwind"))]
             Error::GimliError { err } => write!(f, "{err}"),
             #[cfg(feature = "ldso")]
@@ -119,8 +120,6 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Error::IOError { err } => Some(err),
-            #[cfg(feature = "mmap")]
-            Error::MmapError { err } => Some(err),
             _ => None,
         }
     }
@@ -138,14 +137,6 @@ impl From<std::io::Error> for Error {
     #[cold]
     fn from(value: std::io::Error) -> Self {
         Error::IOError { err: value }
-    }
-}
-
-#[cfg(feature = "mmap")]
-impl From<nix::Error> for Error {
-    #[cold]
-    fn from(value: nix::Error) -> Self {
-        Error::MmapError { err: value }
     }
 }
 

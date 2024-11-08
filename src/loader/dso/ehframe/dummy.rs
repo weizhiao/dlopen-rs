@@ -11,8 +11,3 @@ impl EhFrame {
         Ok(EhFrame)
     }
 }
-
-impl EhFrame {
-    #[inline]
-    pub(crate) fn register_unwind(&self, _segments: &ELFSegments) {}
-}

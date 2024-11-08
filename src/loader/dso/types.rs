@@ -7,7 +7,6 @@ use elf::{
     endian::NativeEndian,
     file::{parse_ident, FileHeader},
 };
-
 pub(crate) struct ELFEhdr {
     ehdr: FileHeader<NativeEndian>,
 }

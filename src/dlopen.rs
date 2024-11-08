@@ -1,4 +1,4 @@
-use crate::{ELFLibrary, RelocatedLibrary, Result};
+use crate::{ELFLibrary, Mmap, RelocatedLibrary, Result};
 use hashbrown::HashMap;
 use std::{env, fs::File, path::PathBuf, sync::OnceLock};
 
@@ -22,7 +22,7 @@ impl ELFLibrary {
     /// let path = Path::new("/path/to/library.so");
     /// let lib = ELFLibrary::dlopen(path).expect("Failed to load library");
     /// ```
-    pub fn dlopen<P: AsRef<std::ffi::OsStr>>(path: P) -> Result<RelocatedLibrary> {
+    pub fn dlopen<M: Mmap>(path: impl AsRef<std::ffi::OsStr>) -> Result<RelocatedLibrary> {
         LD_LIBRARY_PATH.get_or_init(|| {
             let ld_library_path =
                 env::var("RUST_LD_LIBRARY_PATH").expect("env RUST_LD_LIBRARY_PATH");
@@ -32,10 +32,10 @@ impl ELFLibrary {
                 .map(|str| PathBuf::try_from(str).unwrap())
                 .collect()
         });
-        let lib = ELFLibrary::from_file(path)?;
+        let lib = ELFLibrary::from_file::<M>(path)?;
         let mut relocated_libs = HashMap::new();
         // 不支持循环依赖，relocated_libs的作用是防止一个库被多次重复加载
-        fn load_and_relocate(
+        fn load_and_relocate<M: Mmap>(
             lib: ELFLibrary,
             relocated_libs: &mut HashMap<String, RelocatedLibrary>,
         ) -> Result<RelocatedLibrary> {
@@ -64,9 +64,11 @@ impl ELFLibrary {
                         let file_path = sys_path.join(needed_lib_name);
                         match File::open(&file_path) {
                             Ok(file) => {
-                                let new_lib =
-                                    ELFLibrary::from_open_file(file, file_path.to_str().unwrap())?;
-                                let lib = load_and_relocate(new_lib, relocated_libs)?;
+                                let new_lib = ELFLibrary::from_open_file::<M>(
+                                    file,
+                                    file_path.to_str().unwrap(),
+                                )?;
+                                let lib = load_and_relocate::<M>(new_lib, relocated_libs)?;
                                 relocated_libs.insert_unique_unchecked(
                                     needed_lib_name.to_string(),
                                     lib.clone(),
@@ -93,6 +95,6 @@ impl ELFLibrary {
             }
             lib.relocate(needed_libs)
         }
-        load_and_relocate(lib, &mut relocated_libs)
+        load_and_relocate::<M>(lib, &mut relocated_libs)
     }
 }

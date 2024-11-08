@@ -1,9 +1,8 @@
-use core::ffi::c_void;
-
 use crate::{
     loader::{arch::Phdr, dso::segment::ELFSegments},
     Result,
 };
+use core::ffi::c_void;
 
 pub(crate) struct EhFrame(usize);
 
@@ -23,7 +22,18 @@ impl EhFrame {
             gimli::Pointer::Direct(x) => x as usize,
             gimli::Pointer::Indirect(x) => unsafe { *(x as *const _) },
         };
-        Ok(EhFrame(eh_frame_addr))
+        let unwind = EhFrame(eh_frame_addr);
+        unwind.register_unwind(segments);
+        Ok(unwind)
+    }
+
+    #[inline]
+    fn register_unwind(&self, _segments: &ELFSegments) {
+        extern "C" {
+            fn __register_frame(begin: *const c_void);
+        }
+        //在使用libgcc的情况下直接传eh_frame的地址即可
+        unsafe { __register_frame(self.0 as _) };
     }
 }
 
@@ -33,16 +43,5 @@ impl Drop for EhFrame {
             fn __deregister_frame(begin: *const c_void);
         }
         unsafe { __deregister_frame(self.0 as _) };
-    }
-}
-
-impl EhFrame {
-    #[inline]
-    pub(crate) fn register_unwind(&self, _segments: &ELFSegments) {
-        extern "C" {
-            fn __register_frame(begin: *const c_void);
-        }
-        //在使用libgcc的情况下直接传eh_frame的地址即可
-        unsafe { __register_frame(self.0 as _) };
     }
 }

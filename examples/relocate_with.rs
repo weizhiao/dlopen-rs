@@ -1,46 +1,37 @@
-use dlopen_rs::{ELFLibrary, ExternLibrary};
-use libloading::Library;
-use std::{path::Path, sync::Arc};
+use dlopen_rs::{ELFLibrary, MmapImpl};
+use nix::libc::size_t;
+use std::{ffi::c_void, path::Path};
 
-#[derive(Debug, Clone)]
-struct MyLib(Arc<Library>);
-
-impl ExternLibrary for MyLib {
-    fn get_sym(&self, name: &str) -> Option<*const ()> {
-        let sym: Option<*const ()> = unsafe {
-            self.0
-                .get::<*const usize>(name.as_bytes())
-                .map_or(None, |sym| Some(sym.into_raw().into_raw() as _))
-        };
-        sym
-    }
+extern "C" fn mymalloc(size: size_t) -> *mut c_void {
+    println!("malloc:{}bytes", size);
+    unsafe { nix::libc::malloc(size) }
 }
 
 fn main() {
     let path = Path::new("./target/release/libexample.so");
+    let libc = ELFLibrary::sys_load("libc.so.6").unwrap();
+    let libgcc = ELFLibrary::sys_load("libgcc_s.so.1").unwrap();
 
-    let libc = MyLib(Arc::new(unsafe {
-        Library::new("/lib/x86_64-linux-gnu/libc.so.6").unwrap()
-    }));
-
-    let libgcc = MyLib(Arc::new(unsafe {
-        Library::new("/lib/x86_64-linux-gnu/libgcc_s.so.1").unwrap()
-    }));
-
-    let libexample = ELFLibrary::from_file(path)
+    let libexample = ELFLibrary::from_file::<MmapImpl>(path)
         .unwrap()
-        .relocate_with(&[], vec![libc, libgcc])
+        .relocate_with(&[libc, libgcc], |name| {
+            if name == "malloc" {
+                return Some(mymalloc as _);
+            } else {
+                return None;
+            }
+        })
         .unwrap();
 
-    let f: dlopen_rs::Symbol<fn(i32, i32) -> i32> = unsafe { libexample.get("add").unwrap() };
+    let f = unsafe { libexample.get::<fn(i32, i32) -> i32>("add").unwrap() };
     println!("{}", f(1, 1));
 
-    let g: dlopen_rs::Symbol<fn(&str)> = unsafe { libexample.get("print").unwrap() };
-    g("dlopen-rs: hello world");
+    let f = unsafe { libexample.get::<fn(&str)>("print").unwrap() };
+    f("dlopen-rs: hello world");
 
-    let f: dlopen_rs::Symbol<fn()> = unsafe { libexample.get("thread_local").unwrap() };
+    let f = unsafe { libexample.get::<fn()>("thread_local").unwrap() };
     f();
 
-    let f: dlopen_rs::Symbol<fn()> = unsafe { libexample.get("panic").unwrap() };
+    let f = unsafe { libexample.get::<fn()>("panic").unwrap() };
     f();
 }

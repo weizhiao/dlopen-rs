@@ -23,7 +23,9 @@ impl EhFrame {
             gimli::Pointer::Direct(x) => x as usize,
             gimli::Pointer::Indirect(x) => unsafe { *(x as *const _) },
         };
-        Ok(EhFrame(eh_frame_addr))
+        let unwind = EhFrame(eh_frame_addr);
+        unwind.register_unwind(segments);
+        Ok(unwind)
     }
 }
 
