@@ -27,9 +27,6 @@
 //! };
 //! println!("{}", add(1,1));
 //! ```
-#![cfg_attr(feature = "nightly", allow(internal_features))]
-#![cfg_attr(feature = "nightly", feature(core_intrinsics))]
-#![cfg_attr(all(feature = "nightly", not(feature = "std")), feature(error_in_core))]
 #![cfg_attr(not(feature = "std"), no_std)]
 extern crate alloc;
 
@@ -47,17 +44,12 @@ mod relocation;
 mod types;
 
 use alloc::string::{String, ToString};
+use core::fmt::Display;
 pub use loader::{
     mmap::{MapFlags, Mmap, MmapImpl, Offset, OffsetType, ProtFlags},
     ELFLibrary,
 };
 pub use types::{RelocatedLibrary, Symbol};
-
-#[cfg(not(feature = "nightly"))]
-use core::convert::identity as unlikely;
-use core::fmt::Display;
-#[cfg(feature = "nightly")]
-use core::intrinsics::unlikely;
 
 #[cfg(not(any(
     target_arch = "x86_64",
@@ -130,13 +122,6 @@ impl std::error::Error for Error {
             Error::IOError { err } => Some(err),
             _ => None,
         }
-    }
-}
-
-#[cfg(all(feature = "nightly", not(feature = "std")))]
-impl core::error::Error for Error {
-    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
-        None
     }
 }
 

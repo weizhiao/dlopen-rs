@@ -13,7 +13,7 @@ mod types;
 #[cfg(feature = "version")]
 mod version;
 
-use crate::{parse_dynamic_error, relocation::UserData, unlikely, RelocatedLibrary, Result};
+use crate::{parse_dynamic_error, relocation::UserData, RelocatedLibrary, Result};
 use alloc::ffi::CString;
 use alloc::vec::Vec;
 use arch::{Phdr, Rela};
@@ -167,14 +167,15 @@ impl ELFLibrary {
     ///
     /// ```no_run
     /// # use ::dlopen_rs::ELFLibrary;
-    /// let lib = ELFLibrary::from_file("/path/to/awesome.module")
+    /// let lib = ELFLibrary::from_file::<MmapImpl>("/path/to/awesome.module")
     ///		.unwrap();
     /// ```
     ///
     #[cfg(feature = "std")]
     pub fn from_file<M: Mmap>(path: impl AsRef<std::ffi::OsStr>) -> Result<Self> {
-        let file_name = path.as_ref().to_str().unwrap();
-        let file = std::fs::File::open(path.as_ref())?;
+        let path = path.as_ref();
+        let file_name = path.to_str().unwrap();
+        let file = std::fs::File::open(path)?;
         let mut file = file::ELFFile::new(file);
         let inner = file.load::<M>(CString::new(file_name).unwrap())?;
         Ok(ELFLibrary { inner })
@@ -204,7 +205,7 @@ impl ELFLibrary {
     /// use dlopen_rs::ELFLibrary;
     ///
     /// let file = File::open("path_to_elf").unwrap();
-    /// let lib = ELFLibrary::from_open_file(file, "my_elf_library").unwrap();
+    /// let lib = ELFLibrary::from_open_file::<MmapImpl>(file, "my_elf_library").unwrap();
     /// ```
     ///
     /// # Errors
@@ -226,7 +227,7 @@ impl ELFLibrary {
     /// # use ::dlopen_rs::ELFLibrary;
     /// let path = Path::new("/path/to/awesome.module");
     /// let bytes = std::fs::read(path).unwrap();
-    /// let lib = ELFLibrary::from_binary(&bytes).unwarp();
+    /// let lib = ELFLibrary::from_binary::<MmapImpl>(&bytes).unwarp();
     /// ```
     pub fn from_binary<M: Mmap>(bytes: &[u8], name: impl AsRef<str>) -> Result<Self> {
         let mut file = ELFBinary::new(bytes);
@@ -479,7 +480,7 @@ pub(crate) trait MapSegment: RawData {
                 )?
             };
             //将类似bss节的内存区域的值设置为0
-            if unlikely(phdr.p_filesz != phdr.p_memsz) {
+            if phdr.p_filesz != phdr.p_memsz {
                 // 用0填充这一页
                 let zero_start = (phdr.p_vaddr + phdr.p_filesz) as usize;
                 let zero_end = (zero_start + PAGE_SIZE - 1) & MASK;

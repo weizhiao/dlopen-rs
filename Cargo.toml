@@ -5,11 +5,11 @@ edition = "2021"
 authors = ["wzhao <1207410841@qq.com>"]
 readme = "README.md"
 repository = "https://github.com/weizhiao/dlopen-rs"
-keywords = ["dlopen", "so", "elf", "ldso"]
+keywords = ["dlopen", "elf", "unix", "loader"]
 categories = ["no-std", "os", "embedded"]
 license = "Apache-2.0"
 description = "A library for loading elf dynamic libraries from memory and files"
-exclude = [".gitignore", "/test", "/example-dylib"]
+exclude = [".gitignore", "/test", "/example-dylib", "check.sh"]
 
 [workspace]
 members = ["example-dylib"]
@@ -58,7 +58,7 @@ bitflags = "2.6.0"
 cfg-if = '1.0'
 
 [features]
-default = ["ldso", "libgcc", "tls", "debug", "mmap_impl"]
+default = ["ldso", "libgcc", "tls", "mmap_impl"]
 
 # allows dynamic libraries to be loaded using system dynamic loaders(ldso)
 ldso = ["std", "dep:nix"]
@@ -74,8 +74,6 @@ no_mmap_impl = []
 tls = ["std", "dep:nix"]
 # activate specific versions of symbols for dynamic library loading
 version = []
-# enable this can make loading `faster`, but you'll need to use the `nightly` compiler
-nightly = []
 # enable this when you want to use the exception handling mechanism provided by dlopen-rs
 unwinding = ["dep:unwinding", "dep:spin"]
 # enable this when program uses libgcc to handle exceptions

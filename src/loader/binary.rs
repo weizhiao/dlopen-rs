@@ -11,7 +11,7 @@ pub(crate) struct ELFBinary<'a> {
 }
 
 impl<'bytes> ELFBinary<'bytes> {
-    pub(crate) fn new(bytes: &'bytes [u8]) -> Self {
+    pub(crate) const fn new(bytes: &'bytes [u8]) -> Self {
         ELFBinary { bytes }
     }
 }

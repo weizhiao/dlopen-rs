@@ -66,23 +66,6 @@ impl Drop for ELFSegments {
 }
 
 impl ELFSegments {
-    #[inline]
-    pub(crate) fn map_prot(prot: u32) -> mmap::ProtFlags {
-        let mut prot_flag = ProtFlags::empty();
-        if prot & PF_X != 0 {
-            prot_flag |= ProtFlags::PROT_EXEC;
-        }
-        if prot & PF_W != 0 {
-            prot_flag |= ProtFlags::PROT_WRITE;
-        }
-        if prot & PF_R != 0 {
-            prot_flag |= ProtFlags::PROT_READ;
-        }
-        prot_flag
-    }
-}
-
-impl ELFSegments {
     pub(crate) fn new<M: Mmap>(memory: NonNull<c_void>, offset: isize, len: usize) -> Self {
         ELFSegments {
             memory,
@@ -92,6 +75,13 @@ impl ELFSegments {
                 M::munmap(addr, len).unwrap();
             }),
         }
+    }
+
+    #[inline]
+    pub(crate) fn map_prot(prot: u32) -> mmap::ProtFlags {
+        mmap::ProtFlags::from_bits_retain(
+            ((prot & PF_X) << 2 | prot & PF_W | (prot & PF_R) >> 2) as _,
+        )
     }
 
     #[inline]

@@ -20,7 +20,7 @@ pub(crate) struct ELFFile {
 }
 
 impl ELFFile {
-    pub(crate) fn new(file: File) -> Self {
+    pub(crate) const fn new(file: File) -> Self {
         ELFFile { file }
     }
 }

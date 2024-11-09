@@ -82,7 +82,7 @@ pub(crate) struct ELFStringTable {
 }
 
 impl ELFStringTable {
-    fn new(data: &'static [u8]) -> Self {
+    const fn new(data: &'static [u8]) -> Self {
         ELFStringTable { data }
     }
 

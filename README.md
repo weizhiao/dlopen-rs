@@ -19,7 +19,7 @@ Additional, it integrates seamlessly with the system’s dynamic linker in `std`
 | ------------ | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ldso         | Yes     | Allows dynamic libraries to be loaded using system dynamic loaders (ld.so).                                                                           |
 | std          | Yes     | Enable `std`                                                                                                                                          |
-| debug        | Yes     | Enable this to use gdb/lldb for debugging loaded dynamic libraries. Note that only dynamic libraries loaded using dlopen-rs can be debugged with gdb. |
+| debug        | No      | Enable this to use gdb/lldb for debugging loaded dynamic libraries. Note that only dynamic libraries loaded using dlopen-rs can be debugged with gdb. |
 | mmap_impl    | Yes     | Enable default implementation on platforms with mmap                                                                                                  |
 | no_mmap_impl | No      | Enable default implementation on platforms without mmap                                                                                               |
 | version      | No      | Activate specific versions of symbols for dynamic library loading                                                                                     |
@@ -160,4 +160,4 @@ impl Mmap for MmapImpl {
 }
 ```
 ## NOTE
-If you encounter any issues while using it or need any new features, feel free to raise an issue on GitHub. 
+If you encounter any issues while using the library, feel free to raise an issue on GitHub. If   `dlopen-rs`   has been helpful to you, don't hesitate to give it a   `star`  . ^V^

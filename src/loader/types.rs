@@ -1,6 +1,6 @@
 use crate::{
     loader::arch::{EHDR_SIZE, EM_ARCH, E_CLASS},
-    parse_ehdr_error, unlikely, Result,
+    parse_ehdr_error, Result,
 };
 use elf::{
     abi::*,
@@ -23,15 +23,15 @@ impl ELFEhdr {
     //验证elf头
     #[inline]
     pub(crate) fn validate(&self) -> Result<()> {
-        if unlikely(self.ehdr.e_type != ET_DYN) {
+        if self.ehdr.e_type != ET_DYN {
             return Err(parse_ehdr_error("file type mismatch"));
         }
 
-        if unlikely(self.ehdr.e_machine != EM_ARCH) {
+        if self.ehdr.e_machine != EM_ARCH {
             return Err(parse_ehdr_error("file arch mismatch"));
         }
 
-        if unlikely(self.ehdr.class != E_CLASS) {
+        if self.ehdr.class != E_CLASS {
             return Err(parse_ehdr_error("file class mismatch"));
         }
 

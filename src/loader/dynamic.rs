@@ -9,45 +9,45 @@ use elf::abi::*;
 pub(crate) struct ELFRawDynamic {
     #[cfg(feature = "debug")]
     dyn_addr: usize,
-	/// DT_GNU_HASH
+    /// DT_GNU_HASH
     hash_off: usize,
-	/// DT_STMTAB
+    /// DT_STMTAB
     symtab_off: usize,
-	/// DT_STRTAB
+    /// DT_STRTAB
     strtab_off: usize,
-	/// DT_STRSZ
+    /// DT_STRSZ
     strtab_size: usize,
-	/// DT_JMPREL
+    /// DT_JMPREL
     pltrel_off: Option<usize>,
-	/// DT_PLTRELSZ
+    /// DT_PLTRELSZ
     pltrel_size: Option<usize>,
-	/// DT_RELA
+    /// DT_RELA
     rela_off: Option<usize>,
-	/// DT_RELASZ
+    /// DT_RELASZ
     rela_size: Option<usize>,
-	/// DT_INIT
+    /// DT_INIT
     init_off: Option<usize>,
-	/// DT_FINI
+    /// DT_FINI
     fini_off: Option<usize>,
-	/// DT_INIT_ARRAY
+    /// DT_INIT_ARRAY
     init_array_off: Option<usize>,
-	/// DT_INIT_ARRAYSZ
+    /// DT_INIT_ARRAYSZ
     init_array_size: Option<usize>,
-	/// DT_FINI_ARRAY
+    /// DT_FINI_ARRAY
     fini_array_off: Option<usize>,
-	/// DT_FINI_ARRAYSZ
+    /// DT_FINI_ARRAYSZ
     fini_array_size: Option<usize>,
-	/// DT_VERSYM
+    /// DT_VERSYM
     version_ids_off: Option<usize>,
-	/// DT_VERNEED
+    /// DT_VERNEED
     verneed_off: Option<usize>,
-	/// DT_VERNEEDNUM
+    /// DT_VERNEEDNUM
     verneed_num: Option<usize>,
-	/// DT_VERDEF
+    /// DT_VERDEF
     verdef_off: Option<usize>,
-	/// DT_VERDEFNUM
+    /// DT_VERDEFNUM
     verdef_num: Option<usize>,
-	/// DT_NEEDED
+    /// DT_NEEDED
     needed_libs: Vec<usize>,
 }
 
@@ -144,7 +144,7 @@ impl ELFRawDynamic {
         })
     }
 
-	/// 将偏移地址映射到实际内存中的地址
+    /// 将偏移地址映射到实际内存中的地址
     pub(crate) fn finish(self, base: usize) -> ELFDynamic {
         let pltrel = self.pltrel_off.map(|pltrel_off| unsafe {
             from_raw_parts(
@@ -230,42 +230,52 @@ impl ELFDynamic {
         self.dyn_addr
     }
 
+    #[inline]
     pub(crate) fn strtab(&self) -> usize {
         self.strtab_off
     }
 
+    #[inline]
     pub(crate) fn strtab_size(&self) -> usize {
         self.strtab_size
     }
 
+    #[inline]
     pub(crate) fn hashtab(&self) -> usize {
         self.hash_off
     }
 
+    #[inline]
     pub(crate) fn symtab(&self) -> usize {
         self.symtab_off
     }
 
+    #[inline]
     pub(crate) fn pltrel(&self) -> Option<&'static [Rela]> {
         self.pltrel
     }
 
+    #[inline]
     pub(crate) fn rela(&self) -> Option<&'static [Rela]> {
         self.rela
     }
 
+    #[inline]
     pub(crate) fn init_fn(&self) -> Option<extern "C" fn()> {
         self.init_fn
     }
 
+    #[inline]
     pub(crate) fn init_array_fn(&self) -> Option<&'static [extern "C" fn()]> {
         self.init_array_fn
     }
 
+    #[inline]
     pub(crate) fn fini_fn(&self) -> Option<extern "C" fn()> {
         self.fini_fn
     }
 
+    #[inline]
     pub(crate) fn fini_array_fn(&self) -> Option<&'static [extern "C" fn()]> {
         self.fini_array_fn
     }
@@ -285,6 +295,7 @@ impl ELFDynamic {
         self.verdef
     }
 
+    #[inline]
     pub(crate) fn needed_libs(&self) -> &Vec<usize> {
         &self.needed_libs
     }
