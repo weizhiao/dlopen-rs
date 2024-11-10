@@ -119,7 +119,14 @@ impl RelocatedLibrary {
     /// ```
     pub fn dep_libs(&self) -> Option<&Vec<RelocatedLibrary>> {
         match &self.inner().extra {
-            LibraryExtraData::Internal(extra_data) => extra_data.get_dep_libs(),
+            LibraryExtraData::Internal(extra_data) => {
+                let dep_libs = extra_data.get_dep_libs();
+                if dep_libs.is_empty() {
+                    None
+                } else {
+                    Some(dep_libs)
+                }
+            }
             #[cfg(feature = "ldso")]
             LibraryExtraData::External(_) => None,
         }

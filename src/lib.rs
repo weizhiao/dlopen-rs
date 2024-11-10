@@ -40,14 +40,13 @@ mod ldso;
 mod loader;
 #[cfg(feature = "std")]
 mod register;
-mod relocation;
 mod types;
 
 use alloc::string::{String, ToString};
 use core::fmt::Display;
 pub use loader::{
     mmap::{MapFlags, Mmap, MmapImpl, Offset, OffsetType, ProtFlags},
-    ELFLibrary,
+    ELFLibrary, PAGE_SIZE,
 };
 pub use types::{RelocatedLibrary, Symbol};
 

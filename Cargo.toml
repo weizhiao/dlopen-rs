@@ -87,6 +87,14 @@ fde-static = ["unwinding?/fde-static"]
 # see https://github.com/nbdd0121/unwinding/#baremetal
 fde-gnu-eh-frame-hdr = ["unwinding?/fde-gnu-eh-frame-hdr"]
 
+[dev-dependencies]
+criterion = "0.5.1"
+libloading = "0.8.5"
+
+[[bench]]
+name = "my_benchmark"
+harness = false
+
 [[example]]
 name = "from_file"
 required-features = ["ldso", "tls", "libgcc"]

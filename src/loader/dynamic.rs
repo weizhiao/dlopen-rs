@@ -152,7 +152,7 @@ impl ELFRawDynamic {
                 self.pltrel_size.unwrap() / size_of::<Rela>(),
             )
         });
-        let rela = self.rela_off.map(|rel_off| unsafe {
+        let dynrel = self.rela_off.map(|rel_off| unsafe {
             from_raw_parts(
                 (base + rel_off) as *const Rela,
                 self.rela_size.unwrap() / size_of::<Rela>(),
@@ -190,7 +190,7 @@ impl ELFRawDynamic {
             fini_fn,
             fini_array_fn,
             pltrel,
-            rela,
+            dynrel,
             needed_libs: self.needed_libs,
             version_idx: self.version_ids_off,
             verneed,
@@ -217,7 +217,7 @@ pub(crate) struct ELFDynamic {
     fini_fn: Option<extern "C" fn()>,
     fini_array_fn: Option<&'static [extern "C" fn()]>,
     pltrel: Option<&'static [Rela]>,
-    rela: Option<&'static [Rela]>,
+    dynrel: Option<&'static [Rela]>,
     needed_libs: Vec<usize>,
     version_idx: Option<usize>,
     verneed: Option<(usize, usize)>,
@@ -256,8 +256,8 @@ impl ELFDynamic {
     }
 
     #[inline]
-    pub(crate) fn rela(&self) -> Option<&'static [Rela]> {
-        self.rela
+    pub(crate) fn dynrel(&self) -> Option<&'static [Rela]> {
+        self.dynrel
     }
 
     #[inline]

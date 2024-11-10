@@ -1,4 +1,4 @@
-use super::mmap::{self, Mmap, ProtFlags};
+use super::mmap::{self, Mmap, ProtFlags, RawData};
 use crate::{loader::arch::Phdr, Result};
 use alloc::boxed::Box;
 use core::ffi::c_void;
@@ -7,9 +7,9 @@ use core::ptr::NonNull;
 use elf::abi::{PF_R, PF_W, PF_X};
 
 #[cfg(target_arch = "aarch64")]
-pub(crate) const PAGE_SIZE: usize = 0x10000;
+pub const PAGE_SIZE: usize = 0x10000;
 #[cfg(not(target_arch = "aarch64"))]
-pub(crate) const PAGE_SIZE: usize = 0x1000;
+pub const PAGE_SIZE: usize = 0x1000;
 
 pub(crate) const MASK: usize = !(PAGE_SIZE - 1);
 
@@ -117,5 +117,80 @@ impl ELFSegments {
                 self.len,
             )
         }
+    }
+}
+
+pub(crate) trait MapSegment: RawData {
+    fn create_segments<M: Mmap>(
+        &self,
+        min_vaddr: usize,
+        total_size: usize,
+        offset: usize,
+        len: usize,
+        prot: u32,
+    ) -> crate::Result<ELFSegments> {
+        let memory = unsafe {
+            M::mmap(
+                None,
+                total_size,
+                ELFSegments::map_prot(prot),
+                mmap::MapFlags::MAP_PRIVATE,
+                self.transport(offset, len),
+            )?
+        };
+        Ok(ELFSegments::new::<M>(
+            memory,
+            -(min_vaddr as isize),
+            total_size,
+        ))
+    }
+
+    fn load_segment<M: Mmap>(&self, segments: &ELFSegments, phdr: &Phdr) -> crate::Result<()> {
+        // 映射的起始地址与结束地址都是页对齐的
+        let addr_min = (-segments.offset()) as usize;
+        let base = segments.base();
+        let min_vaddr = phdr.p_vaddr as usize & MASK;
+        let max_vaddr = (phdr.p_vaddr as usize + phdr.p_memsz as usize + PAGE_SIZE - 1) & MASK;
+        let memsz = max_vaddr - min_vaddr;
+        let prot = ELFSegments::map_prot(phdr.p_flags);
+        let real_addr = min_vaddr + base;
+        let offset = phdr.p_offset as usize;
+        let filesz = phdr.p_filesz as usize;
+        // 将类似bss节的内存区域的值设置为0
+        if addr_min != min_vaddr {
+            let _ = unsafe {
+                M::mmap(
+                    Some(real_addr),
+                    memsz,
+                    prot,
+                    mmap::MapFlags::MAP_PRIVATE | mmap::MapFlags::MAP_FIXED,
+                    self.transport(offset, filesz),
+                )?
+            };
+            //将类似bss节的内存区域的值设置为0
+            if phdr.p_filesz != phdr.p_memsz {
+                // 用0填充这一页
+                let zero_start = (phdr.p_vaddr + phdr.p_filesz) as usize;
+                let zero_end = (zero_start + PAGE_SIZE - 1) & MASK;
+                let zero_mem = &mut segments.as_mut_slice()[zero_start..zero_end];
+                zero_mem.fill(0);
+
+                if zero_end < max_vaddr {
+                    //之后剩余的一定是页的整数倍
+                    //如果有剩余的页的话，将其映射为匿名页
+                    let zero_mmap_addr = base + zero_end;
+                    let zero_mmap_len = max_vaddr - zero_end;
+                    unsafe {
+                        M::mmap_anonymous(
+                            zero_mmap_addr,
+                            zero_mmap_len,
+                            prot,
+                            mmap::MapFlags::MAP_PRIVATE | mmap::MapFlags::MAP_FIXED,
+                        )?;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }

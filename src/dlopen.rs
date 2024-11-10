@@ -93,7 +93,7 @@ impl ELFLibrary {
 
                 needed_libs.push(needed_lib);
             }
-            lib.relocate(needed_libs)
+            lib.relocate(needed_libs).finish()
         }
         load_and_relocate::<M>(lib, &mut relocated_libs)
     }

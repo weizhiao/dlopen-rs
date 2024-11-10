@@ -10,7 +10,9 @@ fn main() {
 
     let libexample = ELFLibrary::from_binary::<MmapImpl>(&bytes, "libexample.so")
         .unwrap()
-        .relocate(&[libgcc, libc])
+        .relocate(&[libgcc])
+        .relocate(&[libc])
+        .finish()
         .unwrap();
 
     let add: dlopen_rs::Symbol<fn(i32, i32) -> i32> = unsafe { libexample.get("add").unwrap() };

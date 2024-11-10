@@ -181,7 +181,7 @@ impl SymbolData {
         &self.strtab
     }
 
-    pub(crate) fn get_sym(&self, symbol: &SymbolInfo) -> Option<&ELFSymbol> {
+    pub(crate) fn get_sym(&self, symbol: &SymbolInfo) -> Option<&'static ELFSymbol> {
         let hash = ELFGnuHash::gnu_hash(symbol.name.as_bytes());
         let bloom_width: u32 = 8 * size_of::<usize>() as u32;
         let bloom_idx = (hash / (bloom_width)) as usize % self.hashtab.blooms.len();
@@ -230,7 +230,7 @@ impl SymbolData {
         None
     }
 
-    pub(crate) fn rel_symbol(&self, idx: usize) -> (&ELFSymbol, SymbolInfo) {
+    pub(crate) fn rel_symbol(&self, idx: usize) -> (&'static ELFSymbol, SymbolInfo) {
         let symbol = unsafe { &*self.symtab.add(idx) };
         let name = self.strtab.get(symbol.st_name as usize);
         (

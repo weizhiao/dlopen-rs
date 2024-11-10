@@ -48,6 +48,7 @@ fn main() {
     let libexample = ELFLibrary::from_file::<MyMmapImpl>(path)
         .unwrap()
         .relocate(&[libc, libgcc])
+        .finish()
         .unwrap();
 
     let add = unsafe { libexample.get::<fn(i32, i32) -> i32>("add").unwrap() };

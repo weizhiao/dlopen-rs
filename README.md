@@ -58,6 +58,7 @@ fn main() {
                 return None;
             }
         })
+        .finish()
         .unwrap();
 
     let add = unsafe { libexample.get::<fn(i32, i32) -> i32>("add").unwrap() };

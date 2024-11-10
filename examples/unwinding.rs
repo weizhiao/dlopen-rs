@@ -9,6 +9,7 @@ fn main() {
     let libexample = ELFLibrary::from_file(path)
         .unwrap()
         .relocate(&[libc])
+        .finish()
         .unwrap();
 
     let f: dlopen_rs::Symbol<fn(i32, i32) -> i32> = unsafe { libexample.get("add").unwrap() };

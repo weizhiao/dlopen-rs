@@ -8,7 +8,9 @@ fn main() {
 
     let libexample = ELFLibrary::from_file::<MmapImpl>(path)
         .unwrap()
-        .relocate(&[libc, libgcc])
+        .relocate(&[libc])
+        .relocate(&[libgcc])
+        .finish()
         .unwrap();
 
     libexample.register();
