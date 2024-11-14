@@ -1,35 +1,64 @@
-use crate::RelocatedLibrary;
-use core::ptr::{self, null_mut};
+use crate::{
+    loader::{ehframe::EhFrame, tls::ElfTls},
+    ElfLibrary,
+};
+use core::{ffi::CStr, ptr::null_mut, sync::atomic::AtomicBool};
+use elf_loader::{arch::Phdr, ElfDylib};
 use hashbrown::HashMap;
 use std::{
     ffi::CString,
-    sync::{Arc, LazyLock, RwLock},
+    sync::{LazyLock, RwLock},
 };
 
-static REGISTER_LIBS: LazyLock<RwLock<HashMap<CString, RelocatedLibrary>>> =
+static REGISTER_LIBS: LazyLock<RwLock<HashMap<CString, &'static RegisterInfo>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
 
-impl RelocatedLibrary {
-    /// Registers the loaded dynamic library to ensure the correct execution
-    /// of the `dl_iterate_phdr` function, allowing the use of the `backtrace`
-    /// function within the loaded dynamic library.
-    pub fn register(&self) -> Option<RelocatedLibrary> {
-        let mut writer = REGISTER_LIBS.write().unwrap();
-        self.set_register();
-        writer.insert(self.cname().to_owned(), self.clone())
+pub trait Register {
+    fn register(self) -> Self;
+}
+
+pub(crate) struct RegisterInfo {
+    name: &'static CStr,
+    mark: AtomicBool,
+    phdrs: &'static [Phdr],
+    base: usize,
+}
+
+impl RegisterInfo {
+    pub(crate) fn new(dylib: &ElfDylib<ElfTls, EhFrame>) -> Self {
+        Self {
+            name: unsafe { core::mem::transmute(dylib.cname()) },
+            mark: AtomicBool::new(false),
+            phdrs: unsafe { core::mem::transmute(dylib.phdrs()) },
+            base: dylib.base(),
+        }
     }
 }
 
-impl Drop for RelocatedLibrary {
+impl Register for ElfLibrary {
+    fn register(self) -> Self {
+        let mut writer = REGISTER_LIBS.write().unwrap();
+        let info = self
+            .dylib
+            .user_data()
+            .data()
+            .last()
+            .unwrap()
+            .downcast_ref::<RegisterInfo>()
+            .unwrap();
+        info.mark.store(true, core::sync::atomic::Ordering::Relaxed);
+        writer.insert(self.dylib.cname().to_owned(), unsafe {
+            core::mem::transmute(info)
+        });
+        self
+    }
+}
+
+impl Drop for RegisterInfo {
     fn drop(&mut self) {
-        if self.is_register() {
-            if Arc::strong_count(&self.inner) == 2 {
-                let mut writer = REGISTER_LIBS.write().unwrap();
-                let remove = writer.remove(self.cname());
-                //防止死锁
-                drop(writer);
-                drop(remove);
-            }
+        if self.mark.load(core::sync::atomic::Ordering::Relaxed) {
+            let mut writer = REGISTER_LIBS.write().unwrap();
+            writer.remove(self.name);
         }
     }
 }
@@ -47,21 +76,12 @@ pub(crate) unsafe extern "C" fn dl_iterate_phdr_impl(
     use nix::libc::dl_phdr_info;
     let reader = REGISTER_LIBS.read().unwrap();
     let mut ret = nix::libc::dl_iterate_phdr(callback, data);
-    for lib in reader.values() {
-        let extra = if let Some(extra) = lib.get_extra_data() {
-            extra
-        } else {
-            continue;
-        };
-        let (dlpi_phdr, dlpi_phnum) = extra
-            .phdrs()
-            .map(|phdrs| (phdrs.as_ptr().cast(), phdrs.len() as _))
-            .unwrap_or((ptr::null(), 0));
+    for info in reader.values() {
         let mut info = dl_phdr_info {
-            dlpi_addr: lib.base() as _,
-            dlpi_name: lib.cname().as_ptr().cast(),
-            dlpi_phdr,
-            dlpi_phnum,
+            dlpi_addr: info.base as _,
+            dlpi_name: info.name.as_ptr().cast(),
+            dlpi_phdr: info.phdrs.as_ptr().cast(),
+            dlpi_phnum: info.phdrs.len() as _,
             dlpi_adds: reader.len() as _,
             dlpi_subs: 0,
             dlpi_tls_modid: 0,

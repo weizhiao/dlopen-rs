@@ -49,31 +49,26 @@ version = '0.11'
 default-features = false
 features = ['macros']
 
-[dependencies.elf]
-version = "0.7.4"
-default-features = false
-
 [dependencies]
 bitflags = "2.6.0"
 cfg-if = '1.0'
+elf_loader = { git = "https://github.com/weizhiao/elf_loader.git", default-features = false }
 
 [features]
-default = ["ldso", "libgcc", "tls", "mmap_impl"]
+default = ["tls", "ldso", "libgcc", "mmap"]
 
 # allows dynamic libraries to be loaded using system dynamic loaders(ldso)
 ldso = ["std", "dep:nix"]
 # enable this when you want to use gdb/lldb to debug the loaded dynamic libraries
 debug = ["std"]
 # enable std
-std = ["dep:nix"]
+std = ["dep:nix", "elf_loader/std"]
 # enable default implementation on devices with mmap
-mmap_impl = ["dep:nix", "std"]
-# enable default implementation on devices without mmap
-no_mmap_impl = []
+mmap = ["dep:nix", "std", "elf_loader/mmap"]
 # enable this when you need to use thread local storage
-tls = ["std", "dep:nix"]
+tls = ["std", "dep:nix", "elf_loader/tls"]
 # activate specific versions of symbols for dynamic library loading
-version = []
+version = ["elf_loader/version"]
 # enable this when you want to use the exception handling mechanism provided by dlopen-rs
 unwinding = ["dep:unwinding", "dep:spin"]
 # enable this when program uses libgcc to handle exceptions
@@ -109,11 +104,7 @@ required-features = ["std", "tls", "libgcc"]
 
 [[example]]
 name = "unwinding"
-required-features = ["mmap_impl", "tls", "unwinding", "ldso", "fde-phdr-dl"]
-
-[[example]]
-name = "mmap_impl"
-required-features = ["ldso", "libgcc", "tls"]
+required-features = ["tls", "unwinding", "ldso", "fde-phdr-dl"]
 
 [[example]]
 name = "dlopen"

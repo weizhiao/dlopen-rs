@@ -1,13 +1,13 @@
-use dlopen_rs::ELFLibrary;
+use dlopen_rs::{ElfLibrary, Register};
 use std::path::Path;
 
 fn main() {
     let path = Path::new("./target/release/libexample.so");
 
-    let libc = ELFLibrary::sys_load("libc.so.6").unwrap();
-
-    let libexample = ELFLibrary::from_file(path)
+    let libc = ElfLibrary::sys_load("libc.so.6").unwrap();
+    let libexample = ElfLibrary::from_file(path)
         .unwrap()
+        .register()
         .relocate(&[libc])
         .finish()
         .unwrap();

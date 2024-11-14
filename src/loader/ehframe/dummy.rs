@@ -1,13 +1,11 @@
-use crate::{
-    loader::{segment::ELFSegments, Phdr},
-    Result,
-};
+use core::ops::Range;
+use elf_loader::Unwind;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct EhFrame;
 
-impl EhFrame {
-    pub(crate) fn new(_phdr: &Phdr, _segments: &ELFSegments) -> Result<EhFrame> {
-        Ok(EhFrame)
+impl Unwind for EhFrame {
+    unsafe fn new(_phdr: &elf_loader::arch::Phdr, _map_range: Range<usize>) -> Option<Self> {
+        None
     }
 }

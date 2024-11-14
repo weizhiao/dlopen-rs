@@ -1,31 +1,29 @@
-use core::ffi::c_void;
+use core::{ffi::c_void, ops::Range};
+use elf_loader::Unwind;
 
-use crate::{
-    loader::{arch::Phdr, segment::ELFSegments},
-    Result,
-};
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct EhFrame(usize);
 
-impl EhFrame {
-    pub(crate) fn new(phdr: &Phdr, segments: &ELFSegments) -> Result<EhFrame> {
-        let base = segments.base();
+impl Unwind for EhFrame {
+    unsafe fn new(phdr: &elf_loader::arch::Phdr, map_range: Range<usize>) -> Option<Self> {
+        let base = map_range.start;
         let eh_frame_hdr_off = phdr.p_vaddr as usize;
         let eh_frame_hdr_size = phdr.p_memsz as usize;
         let bases =
             gimli::BaseAddresses::default().set_eh_frame_hdr((eh_frame_hdr_off + base) as _);
         let eh_frame_hdr = gimli::EhFrameHdr::new(
-            &segments.as_mut_slice()[eh_frame_hdr_off..eh_frame_hdr_off + eh_frame_hdr_size],
+            core::slice::from_raw_parts((base + eh_frame_hdr_off) as *const u8, eh_frame_hdr_size),
             gimli::NativeEndian,
         )
-        .parse(&bases, core::mem::size_of::<usize>() as _)?;
+        .parse(&bases, core::mem::size_of::<usize>() as _)
+        .unwrap();
         let eh_frame_addr = match eh_frame_hdr.eh_frame_ptr() {
             gimli::Pointer::Direct(x) => x as usize,
             gimli::Pointer::Indirect(x) => unsafe { *(x as *const _) },
         };
         let unwind = EhFrame(eh_frame_addr);
-        unwind.register_unwind(segments);
-        Ok(unwind)
+        unwind.register_unwind();
+        Some(unwind)
     }
 }
 
@@ -65,7 +63,7 @@ impl Drop for EhFrame {
 
 impl EhFrame {
     #[inline]
-    pub(crate) fn register_unwind(&self, _segments: &ELFSegments) {
+    pub(crate) fn register_unwind(&self) {
         extern "C" {
             fn __register_frame(begin: *const c_void);
         }

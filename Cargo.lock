@@ -197,7 +197,7 @@ dependencies = [
  "bitflags",
  "cfg-if",
  "criterion",
- "elf",
+ "elf_loader",
  "gimli 0.30.0",
  "hashbrown",
  "libloading",
@@ -218,6 +218,17 @@ name = "elf"
 version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4445909572dbd556c457c849c4ca58623d84b27c8fff1e74b0b4227d8b90d17b"
+
+[[package]]
+name = "elf_loader"
+version = "0.1.0"
+source = "git+https://github.com/weizhiao/elf_loader.git#6f82d57a34167db99e785a7bc6a43393c7599e13"
+dependencies = [
+ "bitflags",
+ "cfg-if",
+ "elf",
+ "nix",
+]
 
 [[package]]
 name = "example_dylib"

@@ -1,15 +1,10 @@
-use crate::{
-    find_lib_error,
-    loader::{Dyn, ELFRawDynamic, SymbolData},
-    types::{LibraryExtraData, RelocatedLibraryInner},
-    ELFLibrary, RelocatedLibrary, Result,
+use crate::{find_lib_error, loader::ElfLibrary, Result};
+use core::{ffi::c_char, fmt::Debug, mem::MaybeUninit, ptr::NonNull};
+use elf_loader::{
+    arch::Dyn, dynamic::ElfRawDynamic, relocation::RelocatedDylib, segment::ElfSegments, UserData,
 };
-use core::{ffi::c_char, fmt::Debug, mem::MaybeUninit, sync::atomic::AtomicBool};
 use nix::libc::{dlclose, dlinfo, dlopen, RTLD_DI_LINKMAP, RTLD_LOCAL, RTLD_NOW};
-use std::{
-    ffi::{c_void, CString},
-    sync::Arc,
-};
+use std::ffi::{c_void, CString};
 
 #[repr(C)]
 struct LinkMap {
@@ -39,14 +34,14 @@ impl Drop for ExtraData {
     }
 }
 
-impl ELFLibrary {
+impl ElfLibrary {
     /// Convert a raw handle returned by `dlopen`-family of calls to a `RelocatedLibrary`.
     ///
     /// # Safety
     ///
     /// The pointer shall be a result of a successful call of the `dlopen`-family of functions. It must be valid to call `dlclose`
     /// with this pointer as an argument.
-    pub unsafe fn sys_load_from_raw(handle: *mut c_void, name: &str) -> Result<RelocatedLibrary> {
+    pub unsafe fn sys_load_from_raw(handle: *mut c_void, name: &str) -> Result<RelocatedDylib> {
         let cstr = CString::new(name).unwrap();
         if handle.is_null() {
             return Err(find_lib_error(format!(
@@ -64,7 +59,7 @@ impl ELFLibrary {
     /// # use ::dlopen_rs::ELFLibrary;
     /// let libc = ELFLibrary::sys_load("libc.so.6").unwrap();
     /// ```
-    pub fn sys_load(name: &str) -> Result<RelocatedLibrary> {
+    pub fn sys_load(name: &str) -> Result<RelocatedDylib> {
         let cstr = CString::new(name).unwrap();
         let handle = unsafe { dlopen(cstr.as_ptr(), RTLD_NOW | RTLD_LOCAL) };
         if handle.is_null() {
@@ -76,7 +71,7 @@ impl ELFLibrary {
         Self::sys_load_impl(handle, cstr)
     }
 
-    fn sys_load_impl(handle: *mut c_void, cstr: CString) -> Result<RelocatedLibrary> {
+    fn sys_load_impl(handle: *mut c_void, cstr: CString) -> Result<RelocatedDylib> {
         let link_map = unsafe {
             let link_map: MaybeUninit<*const LinkMap> = MaybeUninit::uninit();
             if dlinfo(handle, RTLD_DI_LINKMAP, link_map.as_ptr() as _) != 0 {
@@ -87,24 +82,25 @@ impl ELFLibrary {
             }
             &*link_map.assume_init()
         };
-        let dynamic = ELFRawDynamic::new(link_map.l_ld)?;
-        let base = if dynamic.hash_off() > link_map.l_addr as usize {
+        let dynamic = ElfRawDynamic::new(link_map.l_ld)?;
+        let base = if dynamic.hash_off > link_map.l_addr as usize {
             0
         } else {
             link_map.l_addr as usize
         };
-        let dynamics = dynamic.finish(base);
+        #[allow(unused_mut)]
+        let mut dynamic = dynamic.finish(base);
+        #[allow(unused_mut)]
+        let mut user_data = UserData::empty();
         #[cfg(feature = "debug")]
-        let debug = unsafe {
+        unsafe {
             use super::debug::*;
-            let debug = {
-                dl_debug_init(
-                    link_map.l_addr as usize,
-                    link_map.l_name,
-                    link_map.l_ld as usize,
-                )
-            };
-            debug
+            let debug = DebugInfo::new(
+                link_map.l_addr as usize,
+                link_map.l_name,
+                link_map.l_ld as usize,
+            );
+            user_data.data_mut().push(Box::new(debug));
         };
         #[cfg(feature = "tls")]
         let tls_module_id = unsafe {
@@ -117,38 +113,34 @@ impl ELFLibrary {
                 )));
             }
             let module_id = module_id.assume_init();
-            module_id
+            Some(module_id)
         };
-        let symbols = SymbolData::new(
-            dynamics.hashtab(),
-            dynamics.symtab(),
-            dynamics.strtab(),
-            dynamics.strtab_size(),
-            #[cfg(feature = "version")]
-            dynamics.version_idx().map(|version_idx| version_idx + base),
-            #[cfg(feature = "version")]
-            dynamics
-                .verneed()
-                .map(|(off, num)| (off + link_map.l_addr as usize, num)),
-            #[cfg(feature = "version")]
-            dynamics
-                .verdef()
-                .map(|(off, num)| (off + link_map.l_addr as usize, num)),
-        );
-        Ok(RelocatedLibrary {
-            inner: Arc::new((
-                AtomicBool::new(false),
-                RelocatedLibraryInner {
-                    name: cstr,
-                    #[cfg(feature = "debug")]
-                    link_map: debug,
-                    #[cfg(feature = "tls")]
-                    tls: Some(tls_module_id),
-                    base: link_map.l_addr as _,
-                    symbols,
-                    extra: LibraryExtraData::External(ExtraData { handle }),
-                },
-            )),
-        })
+        #[cfg(not(feature = "tls"))]
+        let tls_module_id = None;
+        #[cfg(feature = "version")]
+        {
+            dynamic.verneed = dynamic
+                .verneed
+                .map(|(off, num)| (off + (link_map.l_addr as usize - base), num));
+            dynamic.verdef = dynamic
+                .verdef
+                .map(|(off, num)| (off + (link_map.l_addr as usize - base), num));
+        }
+        unsafe fn drop_handle(handle: NonNull<c_void>, _len: usize) -> elf_loader::Result<()> {
+            dlclose(handle.as_ptr());
+            Ok(())
+        }
+        let segments =
+            ElfSegments::new(unsafe { NonNull::new_unchecked(handle) }, 0, 0, drop_handle);
+        unsafe {
+            Ok(RelocatedDylib::from_raw(
+                cstr,
+                link_map.l_addr as usize,
+                dynamic,
+                tls_module_id,
+                segments,
+                user_data,
+            ))
+        }
     }
 }

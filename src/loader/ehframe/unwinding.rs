@@ -1,10 +1,6 @@
 use core::{ops::Range, sync::atomic::AtomicBool};
 
-use crate::{
-    loader::{arch::Phdr, segment::ELFSegments},
-    Result,
-};
-
+use elf_loader::Unwind;
 use hashbrown::{hash_table::Entry, HashTable};
 use spin::RwLock;
 use unwinding::custom_eh_frame_finder::{
@@ -14,12 +10,12 @@ use unwinding::custom_eh_frame_finder::{
 #[derive(Debug)]
 pub(crate) struct EhFrame(usize);
 
-impl EhFrame {
-    pub(crate) fn new(phdr: &Phdr, segments: &ELFSegments) -> Result<EhFrame> {
-        let eh_frame_hdr = segments.base() + phdr.p_vaddr as usize;
+impl Unwind for EhFrame {
+    unsafe fn new(phdr: &elf_loader::arch::Phdr, map_range: Range<usize>) -> Option<Self> {
+        let eh_frame_hdr = map_range.start + phdr.p_vaddr as usize;
         let unwind = EhFrame(eh_frame_hdr);
-        unwind.register_unwind(segments);
-        Ok(unwind)
+        unwind.register_unwind(map_range);
+        Some(unwind)
     }
 }
 
@@ -43,14 +39,14 @@ static EH_FINDER: EhFinder = EhFinder::new();
 
 impl EhFrame {
     #[inline]
-    pub(crate) fn register_unwind(&self, segments: &ELFSegments) {
+    pub(crate) fn register_unwind(&self, map_range: Range<usize>) {
         if !IS_SET.swap(true, core::sync::atomic::Ordering::SeqCst) {
             set_custom_eh_frame_finder(&EH_FINDER).unwrap();
         }
 
         let unwind_info = UnwindInfo {
             eh_frame_hdr: self.0,
-            pc_range: segments.base()..segments.base() + segments.len(),
+            pc_range: map_range,
         };
 
         EH_FINDER

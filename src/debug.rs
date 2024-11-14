@@ -4,7 +4,7 @@ use core::{
 };
 use std::sync::{Mutex, Once};
 
-use crate::loader::Dyn;
+use elf_loader::arch::Dyn;
 
 const RT_ADD: c_int = 1;
 const RT_CONSISTENT: c_int = 0;
@@ -93,49 +93,51 @@ static DEBUG: Mutex<CustomDebug> = Mutex::new(CustomDebug {
     tail: null_mut(),
 });
 
-pub(crate) unsafe fn dl_debug_init(base: usize, name: *const i8, dynamic: usize) -> DebugInfo {
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        let debug = unsafe { &mut *addr_of_mut!(_r_debug) };
-        let prev = if let Some(head) = debug.map.as_mut() {
-            //第一个是程序本身
-            debug.map = Box::leak(Box::new(LinkMap {
-                l_addr: head.l_addr,
-                l_name: head.l_name,
-                l_ld: head.l_ld,
-                l_next: null_mut(),
-                l_prev: null_mut(),
-            }));
-            debug.map
-        } else {
-            null_mut()
-        };
+impl DebugInfo {
+    pub(crate) unsafe fn new(base: usize, name: *const i8, dynamic: usize) -> DebugInfo {
+        static INIT: Once = Once::new();
+        INIT.call_once(|| {
+            let debug = unsafe { &mut *addr_of_mut!(_r_debug) };
+            let prev = if let Some(head) = debug.map.as_mut() {
+                //第一个是程序本身
+                debug.map = Box::leak(Box::new(LinkMap {
+                    l_addr: head.l_addr,
+                    l_name: head.l_name,
+                    l_ld: head.l_ld,
+                    l_next: null_mut(),
+                    l_prev: null_mut(),
+                }));
+                debug.map
+            } else {
+                null_mut()
+            };
 
-        let mut custom = DEBUG.lock().unwrap();
-        custom.debug = debug;
-        custom.tail = prev;
-    });
-    let mut custom_debug = DEBUG.lock().unwrap();
-    let tail = custom_debug.tail;
-    let debug = &mut *custom_debug.debug;
-    let link_map = Box::leak(Box::new(LinkMap {
-        l_addr: base as _,
-        l_name: name,
-        l_ld: dynamic as _,
-        l_next: null_mut(),
-        l_prev: tail,
-    }));
-    if tail.is_null() {
-        debug.map = link_map;
-    } else {
-        (*tail).l_next = link_map;
-    }
-    custom_debug.tail = link_map;
-    debug.state = RT_ADD;
-    (debug.brk)();
-    debug.state = RT_CONSISTENT;
-    (debug.brk)();
-    DebugInfo {
-        link_map: Box::from_raw(link_map),
+            let mut custom = DEBUG.lock().unwrap();
+            custom.debug = debug;
+            custom.tail = prev;
+        });
+        let mut custom_debug = DEBUG.lock().unwrap();
+        let tail = custom_debug.tail;
+        let debug = &mut *custom_debug.debug;
+        let link_map = Box::leak(Box::new(LinkMap {
+            l_addr: base as _,
+            l_name: name,
+            l_ld: dynamic as _,
+            l_next: null_mut(),
+            l_prev: tail,
+        }));
+        if tail.is_null() {
+            debug.map = link_map;
+        } else {
+            (*tail).l_next = link_map;
+        }
+        custom_debug.tail = link_map;
+        debug.state = RT_ADD;
+        (debug.brk)();
+        debug.state = RT_CONSISTENT;
+        (debug.brk)();
+        DebugInfo {
+            link_map: Box::from_raw(link_map),
+        }
     }
 }

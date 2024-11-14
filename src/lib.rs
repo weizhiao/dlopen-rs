@@ -30,7 +30,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 extern crate alloc;
 
-mod builtin;
 #[cfg(feature = "debug")]
 mod debug;
 #[cfg(feature = "std")]
@@ -40,15 +39,13 @@ mod ldso;
 mod loader;
 #[cfg(feature = "std")]
 mod register;
-mod types;
-
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use core::fmt::Display;
-pub use loader::{
-    mmap::{MapFlags, Mmap, MmapImpl, Offset, OffsetType, ProtFlags},
-    ELFLibrary, PAGE_SIZE,
-};
-pub use types::{RelocatedLibrary, Symbol};
+
+pub use elf_loader::{relocation::RelocatedDylib, Symbol};
+pub use loader::ElfLibrary;
+#[cfg(feature = "std")]
+pub use register::Register;
 
 #[cfg(not(any(
     target_arch = "x86_64",
@@ -65,12 +62,8 @@ pub enum Error {
     IOError {
         err: std::io::Error,
     },
-    MmapError {
-        msg: String,
-    },
-    #[cfg(any(feature = "libgcc", feature = "libunwind"))]
-    GimliError {
-        err: gimli::Error,
+    LoaderError {
+        err: elf_loader::Error,
     },
     #[cfg(feature = "ldso")]
     FindLibError {
@@ -99,9 +92,7 @@ impl Display for Error {
         match self {
             #[cfg(feature = "std")]
             Error::IOError { err } => write!(f, "{err}"),
-            Error::MmapError { msg } => write!(f, "{msg}"),
-            #[cfg(any(feature = "libgcc", feature = "libunwind"))]
-            Error::GimliError { err } => write!(f, "{err}"),
+            Error::LoaderError { err } => write!(f, "{err}"),
             #[cfg(feature = "ldso")]
             Error::FindLibError { msg } => write!(f, "{msg}"),
             #[cfg(feature = "tls")]
@@ -124,6 +115,13 @@ impl std::error::Error for Error {
     }
 }
 
+impl From<elf_loader::Error> for Error {
+    #[cold]
+    fn from(value: elf_loader::Error) -> Self {
+        Error::LoaderError { err: value }
+    }
+}
+
 #[cfg(feature = "std")]
 impl From<std::io::Error> for Error {
     #[cold]
@@ -132,56 +130,11 @@ impl From<std::io::Error> for Error {
     }
 }
 
-#[cfg(any(feature = "libgcc", feature = "libunwind"))]
-impl From<gimli::Error> for Error {
-    #[cold]
-    fn from(value: gimli::Error) -> Self {
-        Error::GimliError { err: value }
-    }
-}
-
-#[cfg(feature = "tls")]
-#[cold]
-#[inline(never)]
-fn tls_error(msg: &'static str) -> Error {
-    Error::TLSError { msg }
-}
-
 #[cfg(feature = "ldso")]
 #[cold]
 #[inline(never)]
 fn find_lib_error(msg: impl ToString) -> Error {
     Error::FindLibError {
-        msg: msg.to_string(),
-    }
-}
-
-#[cold]
-#[inline(never)]
-fn relocate_error(msg: impl ToString) -> Error {
-    Error::RelocateError {
-        msg: msg.to_string(),
-    }
-}
-
-#[cold]
-#[inline(never)]
-fn find_symbol_error(msg: impl ToString) -> Error {
-    Error::FindSymbolError {
-        msg: msg.to_string(),
-    }
-}
-
-#[cold]
-#[inline(never)]
-fn parse_dynamic_error(msg: &'static str) -> Error {
-    Error::ParseDynamicError { msg }
-}
-
-#[cold]
-#[inline(never)]
-fn parse_ehdr_error(msg: impl ToString) -> Error {
-    Error::ParseEhdrError {
         msg: msg.to_string(),
     }
 }

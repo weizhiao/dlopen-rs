@@ -1,19 +1,18 @@
-use dlopen_rs::{ELFLibrary, MmapImpl};
+use dlopen_rs::{ElfLibrary, Register};
 use std::path::Path;
 
 fn main() {
     let path = Path::new("./target/release/libexample.so");
-    let libc = ELFLibrary::sys_load("libc.so.6").unwrap();
-    let libgcc = ELFLibrary::sys_load("libgcc_s.so.1").unwrap();
+    let libc = ElfLibrary::sys_load("libc.so.6").unwrap();
+    let libgcc = ElfLibrary::sys_load("libgcc_s.so.1").unwrap();
 
-    let libexample = ELFLibrary::from_file::<MmapImpl>(path)
+    let libexample = ElfLibrary::from_file(path)
         .unwrap()
+        .register()
         .relocate(&[libc])
         .relocate(&[libgcc])
         .finish()
         .unwrap();
-
-    libexample.register();
 
     let add = unsafe { libexample.get::<fn(i32, i32) -> i32>("add").unwrap() };
     println!("{}", add(1, 1));
