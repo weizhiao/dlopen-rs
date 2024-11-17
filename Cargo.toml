@@ -38,10 +38,9 @@ version = '0.14'
 default-features = false
 features = ['ahash', 'inline-more']
 
-[dependencies.nix]
-version = '0.29'
+[dependencies.libc]
+version = "0.2.162"
 default-features = false
-features = ['mman']
 optional = true
 
 [dependencies.phf]
@@ -49,24 +48,27 @@ version = '0.11'
 default-features = false
 features = ['macros']
 
+[dependencies.elf_loader]
+version = "0.1.0"
+default-features = false
+
 [dependencies]
 bitflags = "2.6.0"
 cfg-if = '1.0'
-elf_loader = { git = "https://github.com/weizhiao/elf_loader", default-features = false }
 
 [features]
 default = ["tls", "ldso", "libgcc", "mmap"]
 
 # allows dynamic libraries to be loaded using system dynamic loaders(ldso)
-ldso = ["std", "dep:nix"]
+ldso = ["std", "dep:libc"]
 # enable this when you want to use gdb/lldb to debug the loaded dynamic libraries
 debug = ["std"]
 # enable std
-std = ["dep:nix", "elf_loader/std"]
+std = ["dep:libc", "elf_loader/std"]
 # enable default implementation on devices with mmap
-mmap = ["dep:nix", "std", "elf_loader/mmap"]
+mmap = ["dep:libc", "std", "elf_loader/mmap"]
 # enable this when you need to use thread local storage
-tls = ["std", "dep:nix", "elf_loader/tls"]
+tls = ["std", "dep:libc", "elf_loader/tls"]
 # activate specific versions of symbols for dynamic library loading
 version = ["elf_loader/version"]
 # enable this when you want to use the exception handling mechanism provided by dlopen-rs

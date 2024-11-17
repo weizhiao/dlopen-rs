@@ -66,16 +66,16 @@ impl Drop for RegisterInfo {
 pub(crate) unsafe extern "C" fn dl_iterate_phdr_impl(
     callback: Option<
         unsafe extern "C" fn(
-            info: *mut nix::libc::dl_phdr_info,
-            size: nix::libc::size_t,
-            data: *mut nix::libc::c_void,
-        ) -> nix::libc::c_int,
+            info: *mut libc::dl_phdr_info,
+            size: libc::size_t,
+            data: *mut libc::c_void,
+        ) -> libc::c_int,
     >,
-    data: *mut nix::libc::c_void,
-) -> nix::libc::c_int {
-    use nix::libc::dl_phdr_info;
+    data: *mut libc::c_void,
+) -> libc::c_int {
+    use libc::dl_phdr_info;
     let reader = REGISTER_LIBS.read().unwrap();
-    let mut ret = nix::libc::dl_iterate_phdr(callback, data);
+    let mut ret = libc::dl_iterate_phdr(callback, data);
     for info in reader.values() {
         let mut info = dl_phdr_info {
             dlpi_addr: info.base as _,

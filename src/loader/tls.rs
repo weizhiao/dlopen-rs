@@ -5,7 +5,7 @@ mod imp {
         ThreadLocal,
     };
 
-    use nix::libc::{
+    use libc::{
         pthread_getspecific, pthread_key_create, pthread_key_delete, pthread_key_t,
         pthread_setspecific,
     };

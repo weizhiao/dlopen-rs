@@ -1,10 +1,10 @@
 use dlopen_rs::ElfLibrary;
-use nix::libc::size_t;
+use libc::size_t;
 use std::{ffi::c_void, path::Path};
 
 extern "C" fn mymalloc(size: size_t) -> *mut c_void {
     println!("malloc:{}bytes", size);
-    unsafe { nix::libc::malloc(size) }
+    unsafe { libc::malloc(size) }
 }
 
 fn main() {

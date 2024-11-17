@@ -52,11 +52,9 @@ impl ElfLibrary {
     /// * The absolute path to the library;
     /// * A relative (to the current working directory) path to the library.
     /// # Examples
-    ///
-    ///
     /// ```no_run
     /// # use ::dlopen_rs::ELFLibrary;
-    /// let lib = ELFLibrary::from_file::<MmapImpl>("/path/to/awesome.module")
+    /// let lib = ELFLibrary::from_file("/path/to/awesome.module")
     ///		.unwrap();
     /// ```
     ///
@@ -76,34 +74,11 @@ impl ElfLibrary {
     }
 
     /// Creates a new `ELFLibrary` instance from an open file handle.
-    ///
-    /// # Features
-    /// This function is only available when the "std" feature is enabled. The "std"
-    /// feature must be specified in the dependency section of the Cargo.toml file.
-    ///
-    /// # Parameters
-    /// - `file`: A open file handle (`std::fs::File`). The file must point to a valid ELF binary.
-    /// - `name`: An object that can be converted into a `String`, typically a `&str`, which represents the library name.
-    ///
-    /// # Returns
-    /// This function returns a `Result` containing an `ELFLibrary` instance if successful.
-    /// If the file is not a valid ELF binary or cannot be loaded, it returns an `Err` containing an error.
-    ///
-    /// # Safety
-    /// This function is safe to call, but the resulting `ELFLibrary` instance should be used
-    /// carefully, as incorrect usage may lead to undefined behavior.
-    ///
     /// # Examples
     /// ```
-    /// use std::fs::File;
-    /// use dlopen_rs::ELFLibrary;
-    ///
     /// let file = File::open("path_to_elf").unwrap();
-    /// let lib = ELFLibrary::from_open_file::<MmapImpl>(file, "my_elf_library").unwrap();
+    /// let lib = ELFLibrary::from_open_file(file, "my_elf_library").unwrap();
     /// ```
-    ///
-    /// # Errors
-    /// Returns an error if the ELF file cannot be loaded or if there is an issue with the file handle.
     #[cfg(feature = "std")]
     pub fn from_open_file(file: std::fs::File, name: impl AsRef<str>) -> Result<ElfLibrary> {
         use elf_loader::object;
@@ -124,7 +99,7 @@ impl ElfLibrary {
     /// # use ::dlopen_rs::ELFLibrary;
     /// let path = Path::new("/path/to/awesome.module");
     /// let bytes = std::fs::read(path).unwrap();
-    /// let lib = ELFLibrary::from_binary::<MmapImpl>(&bytes).unwarp();
+    /// let lib = ELFLibrary::from_binary(&bytes).unwarp();
     /// ```
     pub fn from_binary(bytes: &[u8], name: impl AsRef<str>) -> Result<Self> {
         let file = ElfBinary::new(name.as_ref(), bytes);
@@ -190,6 +165,7 @@ impl ElfLibrary {
     ///	             return None;
     ///         }
     ///     })
+    ///     .finish()
     ///		.unwrap();
     /// ```
     /// # Note

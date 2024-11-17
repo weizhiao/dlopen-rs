@@ -3,7 +3,7 @@ use core::{ffi::c_char, fmt::Debug, mem::MaybeUninit, ptr::NonNull};
 use elf_loader::{
     arch::Dyn, dynamic::ElfRawDynamic, segment::ElfSegments, RelocatedDylib, UserData,
 };
-use nix::libc::{dlclose, dlinfo, dlopen, RTLD_DI_LINKMAP, RTLD_LOCAL, RTLD_NOW};
+use libc::{dlclose, dlinfo, dlopen, RTLD_DI_LINKMAP, RTLD_LOCAL, RTLD_NOW};
 use std::ffi::{c_void, CString};
 
 #[repr(C)]
@@ -52,9 +52,8 @@ impl ElfLibrary {
         Self::sys_load_impl(handle, cstr)
     }
 
-    ///Use the system dynamic linker (ld.so) to load the dynamic library, allowing it to be used in the same way as dlopen.
+    /// Use the system dynamic linker (ld.so) to load the dynamic library, allowing it to be used in the same way as dlopen.
     /// # Examples
-    ///
     /// ```no_run
     /// # use ::dlopen_rs::ELFLibrary;
     /// let libc = ELFLibrary::sys_load("libc.so.6").unwrap();
@@ -104,7 +103,7 @@ impl ElfLibrary {
         };
         #[cfg(feature = "tls")]
         let tls_module_id = unsafe {
-            use nix::libc::RTLD_DI_TLS_MODID;
+            use libc::RTLD_DI_TLS_MODID;
             let module_id: MaybeUninit<usize> = MaybeUninit::uninit();
             if dlinfo(handle, RTLD_DI_TLS_MODID, module_id.as_ptr() as _) != 0 {
                 return Err(find_lib_error(format!(
