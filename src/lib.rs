@@ -42,7 +42,7 @@ mod register;
 use alloc::string::String;
 use core::fmt::Display;
 
-pub use elf_loader::{relocation::RelocatedDylib, Symbol};
+pub use elf_loader::{RelocatedDylib, Symbol};
 pub use loader::ElfLibrary;
 #[cfg(feature = "std")]
 pub use register::Register;

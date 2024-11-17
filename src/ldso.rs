@@ -1,7 +1,7 @@
 use crate::{find_lib_error, loader::ElfLibrary, Result};
 use core::{ffi::c_char, fmt::Debug, mem::MaybeUninit, ptr::NonNull};
 use elf_loader::{
-    arch::Dyn, dynamic::ElfRawDynamic, relocation::RelocatedDylib, segment::ElfSegments, UserData,
+    arch::Dyn, dynamic::ElfRawDynamic, segment::ElfSegments, RelocatedDylib, UserData,
 };
 use nix::libc::{dlclose, dlinfo, dlopen, RTLD_DI_LINKMAP, RTLD_LOCAL, RTLD_NOW};
 use std::ffi::{c_void, CString};
@@ -135,6 +135,7 @@ impl ElfLibrary {
         unsafe {
             Ok(RelocatedDylib::from_raw(
                 cstr,
+                0,
                 link_map.l_addr as usize,
                 dynamic,
                 tls_module_id,

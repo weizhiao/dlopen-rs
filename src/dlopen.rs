@@ -1,5 +1,5 @@
 use crate::{loader::ElfLibrary, Result};
-use elf_loader::relocation::RelocatedDylib;
+use elf_loader::RelocatedDylib;
 use hashbrown::HashMap;
 use std::{env, fs::File, path::PathBuf, sync::OnceLock};
 

@@ -42,9 +42,9 @@ impl Register for ElfLibrary {
             .dylib
             .user_data()
             .data()
-            .last()
-            .unwrap()
-            .downcast_ref::<RegisterInfo>()
+            .iter()
+            .rev()
+            .find_map(|data| data.downcast_ref::<RegisterInfo>())
             .unwrap();
         info.mark.store(true, core::sync::atomic::Ordering::Relaxed);
         writer.insert(self.dylib.cname().to_owned(), unsafe {

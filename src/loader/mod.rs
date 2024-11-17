@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 use builtin::BuiltinSymbol;
 use core::fmt::Debug;
 use ehframe::EhFrame;
-use elf_loader::{object::ElfBinary, relocation::RelocatedDylib, ElfDylib, Loader};
+use elf_loader::{object::ElfBinary, ElfDylib, Loader, RelocatedDylib};
 use tls::ElfTls;
 
 pub struct ElfLibrary {

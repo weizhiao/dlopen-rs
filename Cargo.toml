@@ -52,7 +52,7 @@ features = ['macros']
 [dependencies]
 bitflags = "2.6.0"
 cfg-if = '1.0'
-elf_loader = { git = "https://github.com/weizhiao/elf_loader.git", default-features = false }
+elf_loader = { git = "https://github.com/weizhiao/elf_loader", default-features = false }
 
 [features]
 default = ["tls", "ldso", "libgcc", "mmap"]
