@@ -10,7 +10,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     let libgcc = ElfLibrary::sys_load("libgcc_s.so.1").unwrap();
     c.bench_function("dlopen-rs", |b| {
         b.iter(|| {
-            let _libexample = ElfLibrary::from_file(path)
+            let _libexample = ElfLibrary::from_file(path, None)
                 .unwrap()
                 .relocate(&[libc.clone(), libgcc.clone()])
                 .finish()

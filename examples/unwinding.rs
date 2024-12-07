@@ -5,7 +5,7 @@ fn main() {
     let path = Path::new("./target/release/libexample.so");
 
     let libc = ElfLibrary::sys_load("libc.so.6").unwrap();
-    let libexample = ElfLibrary::from_file(path)
+    let libexample = ElfLibrary::from_file(path, None)
         .unwrap()
         .register()
         .relocate(&[libc])

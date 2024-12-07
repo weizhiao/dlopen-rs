@@ -8,7 +8,7 @@ fn main() {
     let libc = ElfLibrary::sys_load("libc.so.6").unwrap();
     let libgcc = ElfLibrary::sys_load("libgcc_s.so.1").unwrap();
 
-    let libexample = ElfLibrary::from_binary(&bytes, "libexample.so")
+    let libexample = ElfLibrary::from_binary(&bytes, "libexample.so", Some(true))
         .unwrap()
         .relocate(&[libgcc])
         .relocate(&[libc])

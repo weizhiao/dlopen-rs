@@ -33,7 +33,7 @@ impl ElfLibrary {
                 .map(|str| PathBuf::try_from(str).unwrap())
                 .collect()
         });
-        let lib = ElfLibrary::from_file(path)?;
+        let lib = ElfLibrary::from_file(path, None)?;
         let mut relocated_libs = HashMap::new();
         // 不支持循环依赖，relocated_libs的作用是防止一个库被多次重复加载
         fn load_and_relocate(
@@ -65,8 +65,11 @@ impl ElfLibrary {
                         let file_path = sys_path.join(needed_lib_name);
                         match File::open(&file_path) {
                             Ok(file) => {
-                                let new_lib =
-                                    ElfLibrary::from_open_file(file, file_path.to_str().unwrap())?;
+                                let new_lib = ElfLibrary::from_open_file(
+                                    file,
+                                    file_path.to_str().unwrap(),
+                                    None,
+                                )?;
                                 let lib = load_and_relocate(new_lib, relocated_libs)?;
                                 relocated_libs.insert_unique_unchecked(
                                     needed_lib_name.to_string(),

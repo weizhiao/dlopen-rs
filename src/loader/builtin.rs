@@ -2,15 +2,12 @@ use super::tls::tls_get_addr;
 #[cfg(feature = "std")]
 use crate::register::dl_iterate_phdr_impl;
 use core::ffi::c_int;
-use elf_loader::relocation::StaticSymbol;
 #[cfg(not(feature = "std"))]
 fn dl_iterate_phdr_impl() {}
 
 extern "C" fn __cxa_thread_atexit_impl() -> c_int {
     0
 }
-
-pub(crate) struct BuiltinSymbol;
 
 #[cfg(not(feature = "unwinding"))]
 pub(crate) const BUILTIN: phf::Map<&'static str, *const ()> = phf::phf_map!(
@@ -22,12 +19,6 @@ pub(crate) const BUILTIN: phf::Map<&'static str, *const ()> = phf::phf_map!(
     "__gmon_start__"=> 0 as _,
     "dl_iterate_phdr"=> dl_iterate_phdr_impl as _,
 );
-
-impl StaticSymbol for BuiltinSymbol {
-    fn symbol(name: &str) -> Option<*const ()> {
-        BUILTIN.get(name).copied()
-    }
-}
 
 #[cfg(feature = "unwinding")]
 pub(crate) const BUILTIN: phf::Map<&'static str, *const ()> = phf::phf_map!(

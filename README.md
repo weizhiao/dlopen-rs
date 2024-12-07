@@ -12,7 +12,7 @@ This library serves three purposes:
 2. Provide loading ELF dynamic libraries support for `#![no_std]` targets.
 3. Easily swap out symbols in shared libraries with your own custom symbols at runtime
 
-Additional, it integrates seamlessly with the system’s dynamic linker in `std` environments when the `ldso` feature is enabled. Currently, it supports `x86_64`, `x86`, `RV64`, and `AArch64` architectures.
+Additional, it integrates seamlessly with the system’s dynamic linker in `std` environments when the `ldso` feature is enabled. Currently, it supports `x86_64`, `RV64`, and `AArch64` architectures.
 
 ## Feature
 | Feature   | Default | Description                                                                                                                                           |

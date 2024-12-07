@@ -96,7 +96,7 @@ impl ElfLibrary {
             use super::debug::*;
             let debug = DebugInfo::new(
                 link_map.l_addr as usize,
-                link_map.l_name,
+                link_map.l_name as _,
                 link_map.l_ld as usize,
             );
             user_data.data_mut().push(Box::new(debug));
@@ -129,12 +129,11 @@ impl ElfLibrary {
             dlclose(handle.as_ptr());
             Ok(())
         }
-        let segments =
-            ElfSegments::new(unsafe { NonNull::new_unchecked(handle) }, 0, 0, drop_handle);
+        let ptr = unsafe { NonNull::new_unchecked(handle) };
+        let segments = ElfSegments::new(ptr, 0, drop_handle);
         unsafe {
             Ok(RelocatedDylib::from_raw(
                 cstr,
-                0,
                 link_map.l_addr as usize,
                 dynamic,
                 tls_module_id,

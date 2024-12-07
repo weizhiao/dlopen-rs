@@ -121,7 +121,7 @@ impl DebugInfo {
         let debug = &mut *custom_debug.debug;
         let link_map = Box::leak(Box::new(LinkMap {
             l_addr: base as _,
-            l_name: name,
+            l_name: name as _,
             l_ld: dynamic as _,
             l_next: null_mut(),
             l_prev: tail,
