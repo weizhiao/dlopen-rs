@@ -8,7 +8,7 @@ English | [中文](README-zh_cn.md)
 A pure-rust library designed for loading ELF dynamic libraries from memory or from files. 
 
 This library serves four purposes:
-1. Provide a pure Rust alternative to musl/glibc `ld.so`.
+1. Provides a dynamic linker written purely in `Rust`.
 2. Provide loading ELF dynamic libraries support for `#![no_std]` targets.
 3. Easily swap out symbols in shared libraries with your own custom symbols at runtime
 4. Faster than `ld.so` in most cases (loading dynamic libraries and getting symbols)
