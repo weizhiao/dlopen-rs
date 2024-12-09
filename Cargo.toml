@@ -18,11 +18,10 @@ resolver = "2"
 [dependencies.spin]
 version = "0.9.8"
 default-features = false
-features = ["rwlock"]
-optional = true
+features = ["rwlock", "lazy", "mutex", "spin_mutex"]
 
 [dependencies.unwinding]
-version = "0.2.3"
+version = "0.2.4"
 default-features = false
 features = ["fde-custom", "unwinder"]
 optional = true
@@ -49,7 +48,7 @@ default-features = false
 features = ['macros']
 
 [dependencies.elf_loader]
-version = "0.2.0"
+version = "0.3.0"
 default-features = false
 
 [dependencies]
@@ -72,7 +71,7 @@ tls = ["std", "dep:libc", "elf_loader/tls"]
 # activate specific versions of symbols for dynamic library loading
 version = ["elf_loader/version"]
 # enable this when you want to use the exception handling mechanism provided by dlopen-rs
-unwinding = ["dep:unwinding", "dep:spin"]
+unwinding = ["dep:unwinding"]
 # enable this when program uses libgcc to handle exceptions
 libgcc = ["dep:gimli"]
 # enable this when program uses libunwind to handle exceptions

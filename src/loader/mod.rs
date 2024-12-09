@@ -4,13 +4,14 @@ pub(crate) mod tls;
 
 #[cfg(feature = "debug")]
 use super::debug::DebugInfo;
-use crate::Result;
+use crate::{register::register, Result};
 use alloc::vec::Vec;
 use core::fmt::Debug;
 use ehframe::EhFrame;
 use elf_loader::{object::ElfBinary, ElfDylib, Loader, RelocatedDylib};
 use tls::ElfTls;
 
+/// An unrelocated dynamic library
 pub struct ElfLibrary {
     pub(crate) dylib: ElfDylib<ElfTls, EhFrame>,
 }
@@ -23,23 +24,17 @@ impl Debug for ElfLibrary {
 
 impl ElfLibrary {
     #[cfg(feature = "debug")]
-    fn add_debug_info(dylib: &mut ElfDylib<ElfTls, EhFrame>) {
+    fn add_debug_info(&mut self) {
         unsafe {
             let debug_info = DebugInfo::new(
-                dylib.base(),
-                dylib.cname().as_ptr() as _,
-                dylib.dynamic() as usize,
+                self.dylib.base(),
+                self.dylib.cname().as_ptr() as _,
+                self.dylib.dynamic() as usize,
             );
-            dylib.user_data_mut().data_mut().push(Box::new(debug_info));
-        }
-    }
-
-    #[cfg(feature = "std")]
-    fn add_register_mark(dylib: &mut ElfDylib<ElfTls, EhFrame>) {
-        use crate::register::RegisterInfo;
-        let info = RegisterInfo::new(&dylib);
-        unsafe {
-            dylib.user_data_mut().data_mut().push(Box::new(info));
+            self.dylib
+                .user_data_mut()
+                .data_mut()
+                .push(Box::new(debug_info));
         }
     }
 
@@ -49,7 +44,7 @@ impl ElfLibrary {
     /// * The absolute path to the library;
     /// * A relative (to the current working directory) path to the library.   
     ///
-    /// The `lazy_bind` argument can be used to force whether delayed binding is enabled or not
+    /// The `lazy_bind` argument can be used to force whether lazy binding is enabled or not
     ///
     /// # Examples
     /// ```no_run
@@ -66,19 +61,20 @@ impl ElfLibrary {
         let file_name = path.to_str().unwrap();
         let file = object::ElfFile::new(file_name, std::fs::File::open(path)?);
         let loader = Loader::<_>::new(file);
-        let mut dylib = loader.load_dylib(lazy_bind)?;
+        let dylib = loader.load_dylib(lazy_bind)?;
+        #[allow(unused_mut)]
+        let mut lib = Self { dylib };
         #[cfg(feature = "debug")]
-        ElfLibrary::add_debug_info(&mut dylib);
-        ElfLibrary::add_register_mark(&mut dylib);
-        Ok(Self { dylib })
+        lib.add_debug_info();
+        Ok(lib)
     }
 
     /// Creates a new `ElfLibrary` instance from an open file handle.
-    /// The `lazy_bind` argument can be used to force whether delayed binding is enabled or not
+    /// The `lazy_bind` argument can be used to force whether lazy binding is enabled or not
     /// # Examples
     /// ```
     /// let file = File::open("path_to_elf").unwrap();
-    /// let lib = ElfLibrary::from_open_file(file, "my_elf_library").unwrap();
+    /// let lib = ElfLibrary::from_open_file(file, "my_elf_library", None).unwrap();
     /// ```
     #[cfg(feature = "std")]
     pub fn from_open_file(
@@ -89,11 +85,12 @@ impl ElfLibrary {
         use elf_loader::object;
         let file = object::ElfFile::new(name.as_ref(), file);
         let loader = Loader::<_>::new(file);
+        let dylib = loader.load_dylib(lazy_bind)?;
         #[allow(unused_mut)]
-        let mut dylib = loader.load_dylib(lazy_bind)?;
+        let mut lib = Self { dylib };
         #[cfg(feature = "debug")]
-        ElfLibrary::add_debug_info(&mut dylib);
-        Ok(Self { dylib })
+        lib.add_debug_info();
+        Ok(lib)
     }
 
     /// load a elf dynamic library from bytes.
@@ -107,17 +104,18 @@ impl ElfLibrary {
     /// let lib = ElfLibrary::from_binary(&bytes, false).unwarp();
     /// ```
     pub fn from_binary(
-        bytes: &[u8],
+        bytes: impl AsRef<[u8]>,
         name: impl AsRef<str>,
         lazy_bind: Option<bool>,
     ) -> Result<Self> {
-        let file = ElfBinary::new(name.as_ref(), bytes);
+        let file = ElfBinary::new(name.as_ref(), bytes.as_ref());
         let loader = Loader::<_>::new(file);
+        let dylib = loader.load_dylib(lazy_bind)?;
         #[allow(unused_mut)]
-        let mut dylib = loader.load_dylib(lazy_bind)?;
+        let mut lib = Self { dylib };
         #[cfg(feature = "debug")]
-        ElfLibrary::add_debug_info(&mut dylib);
-        Ok(Self { dylib })
+        lib.add_debug_info();
+        Ok(lib)
     }
 
     /// get the name of the dependent libraries
@@ -125,10 +123,12 @@ impl ElfLibrary {
         self.dylib.needed_libs()
     }
 
+    /// Whether there are any items that have not been relocated
     pub fn is_finished(&self) -> bool {
         self.dylib.is_finished()
     }
 
+    /// Get the name of the dynamic library.
     pub fn name(&self) -> &str {
         self.dylib.name()
     }
@@ -139,7 +139,7 @@ impl ElfLibrary {
     /// # use ::dlopen_rs::ElfLibrary;
     /// let libc = ElfLibrary::sys_load("libc").unwrap();
     /// let libgcc = ElfLibrary::sys_load("libgcc").unwrap();
-    /// let lib = ElfLibrary::from_file("/path/to/awesome.module",false)
+    /// let lib = ElfLibrary::from_file("/path/to/awesome.module", None)
     /// 	.unwrap()
     /// 	.relocate(&[libgcc, libc])
     ///     .finish()
@@ -164,7 +164,7 @@ impl ElfLibrary {
     /// }
     /// let libc = ElfLibrary::sys_load("libc").unwrap();
     /// let libgcc = ElfLibrary::sys_load("libgcc").unwrap();
-    /// let lib = ElfLibrary::from_file("/path/to/awesome.module", false)
+    /// let lib = ElfLibrary::from_file("/path/to/awesome.module", None)
     /// 	.unwrap()
     /// 	.relocate_with(&[libc, libgcc], |name| {
     ///         if name == "malloc" {
@@ -191,6 +191,8 @@ impl ElfLibrary {
 
     /// finish the relocation and return a relocated dylib
     pub fn finish(self) -> Result<RelocatedDylib> {
-        Ok(self.dylib.finish()?)
+        let mut dylib = self.dylib.finish()?;
+        register(&mut dylib);
+        Ok(dylib)
     }
 }

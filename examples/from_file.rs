@@ -1,4 +1,4 @@
-use dlopen_rs::{ElfLibrary, Register};
+use dlopen_rs::ElfLibrary;
 use std::path::Path;
 
 fn main() {

@@ -9,8 +9,14 @@ extern "C" fn __cxa_thread_atexit_impl() -> c_int {
     0
 }
 
+// TODO: 也许需要自己处理？
+extern "C" fn __cxa_atexit_impl() -> c_int {
+    0
+}
+
 #[cfg(not(feature = "unwinding"))]
 pub(crate) const BUILTIN: phf::Map<&'static str, *const ()> = phf::phf_map!(
+    "__cxa_atexit"=>__cxa_atexit_impl as _,
     "__cxa_finalize"=>0 as _,
     "__cxa_thread_atexit_impl" =>__cxa_thread_atexit_impl as _,
     "__tls_get_addr"=> tls_get_addr as _,
@@ -22,6 +28,7 @@ pub(crate) const BUILTIN: phf::Map<&'static str, *const ()> = phf::phf_map!(
 
 #[cfg(feature = "unwinding")]
 pub(crate) const BUILTIN: phf::Map<&'static str, *const ()> = phf::phf_map!(
+    "__cxa_atexit"=>__cxa_atexit_impl as _,
     "__cxa_thread_atexit_impl" =>__cxa_thread_atexit_impl as _,
     "__tls_get_addr"=> tls_get_addr as _,
     "_ITM_registerTMCloneTable"=> 0 as _,

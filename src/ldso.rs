@@ -1,10 +1,18 @@
-use crate::{find_lib_error, loader::ElfLibrary, Result};
-use core::{ffi::c_char, fmt::Debug, mem::MaybeUninit, ptr::NonNull};
+use crate::{
+    find_lib_error,
+    loader::ElfLibrary,
+    register::{register, RegisterInfo},
+    Result,
+};
+use core::{ffi::c_char, mem::MaybeUninit, ptr::NonNull};
 use elf_loader::{
-    arch::Dyn, dynamic::ElfRawDynamic, segment::ElfSegments, RelocatedDylib, UserData,
+    arch::Dyn, dynamic::ElfRawDynamic, segment::ElfSegments, Dylib, RelocatedDylib, UserData,
 };
 use libc::{dlclose, dlinfo, dlopen, RTLD_DI_LINKMAP, RTLD_LOCAL, RTLD_NOW};
-use std::ffi::{c_void, CString};
+use std::{
+    ffi::{c_void, CString},
+    sync::Arc,
+};
 
 #[repr(C)]
 struct LinkMap {
@@ -13,25 +21,6 @@ struct LinkMap {
     pub l_ld: *mut Dyn,
     l_next: *mut LinkMap,
     l_prev: *mut LinkMap,
-}
-
-#[allow(unused)]
-pub(crate) struct ExtraData {
-    handle: *mut c_void,
-}
-
-impl Debug for ExtraData {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("ExtraData")
-            .field("handler", &self.handle)
-            .finish()
-    }
-}
-
-impl Drop for ExtraData {
-    fn drop(&mut self) {
-        unsafe { dlclose(self.handle) };
-    }
 }
 
 impl ElfLibrary {
@@ -89,8 +78,12 @@ impl ElfLibrary {
         };
         #[allow(unused_mut)]
         let mut dynamic = dynamic.finish(base);
-        #[allow(unused_mut)]
         let mut user_data = UserData::empty();
+        user_data.data_mut().push(Box::new(RegisterInfo {
+            name: cstr.to_str().unwrap().to_string(),
+            phdrs: None,
+            base: link_map.l_addr as usize,
+        }));
         #[cfg(feature = "debug")]
         unsafe {
             use super::debug::*;
@@ -131,15 +124,19 @@ impl ElfLibrary {
         }
         let ptr = unsafe { NonNull::new_unchecked(handle) };
         let segments = ElfSegments::new(ptr, 0, drop_handle);
-        unsafe {
-            Ok(RelocatedDylib::from_raw(
-                cstr,
-                link_map.l_addr as usize,
-                dynamic,
-                tls_module_id,
-                segments,
-                user_data,
-            ))
-        }
+        let mut dylib = RelocatedDylib {
+            inner: Arc::new(unsafe {
+                Dylib::from_raw(
+                    cstr,
+                    link_map.l_addr as usize,
+                    dynamic,
+                    tls_module_id,
+                    segments,
+                    user_data,
+                )
+            }),
+        };
+        register(&mut dylib);
+        Ok(dylib)
     }
 }

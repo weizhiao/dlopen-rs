@@ -1,12 +1,13 @@
-//!A versatile Rust library designed for loading ELF dynamic libraries from memory or from files.
+//!A pure-rust library designed for loading ELF dynamic libraries from memory or from files.
 //!
-//!This library serves three purposes:
+//!This library serves four purposes:
 //!1. Provide a pure Rust alternative to musl ld.so or glibc ld.so.
 //!2. Provide loading ELF dynamic libraries support for `#![no_std]` targets.
 //!3. Easily swap out symbols in shared libraries with your own custom symbols at runtime
+//!4. Faster than `ld.so` in most cases (loading dynamic libraries and getting symbols)
 //!
 //!Additional, it integrates seamlessly with the system’s dynamic linker in `std` environments when the `ldso` feature is enabled.
-//!Currently, it supports `x86_64`, `x86`, `RV64`, and `AArch64` architectures.
+//!Currently, it supports `x86_64`, `RV64`, and `AArch64` architectures.
 //!
 //! # Examples
 //! ```
@@ -15,9 +16,10 @@
 //! let path = Path::new("./target/release/libexample.so");
 //!	let libc = ELFLibrary::sys_load("libc.so.6").unwrap();
 //!	let libgcc = ELFLibrary::sys_load("libgcc_s.so.1").unwrap();
-//! let libexample = ELFLibrary::from_file(path)
+//! let libexample = ELFLibrary::from_file(path, None)
 //!		.unwrap()
 //!		.relocate(&[libgcc, libc])
+//!     .finish()
 //!		.unwrap();
 //!
 //! let add = unsafe {
@@ -32,59 +34,34 @@ extern crate alloc;
 
 #[cfg(feature = "debug")]
 mod debug;
-#[cfg(feature = "std")]
 mod dlopen;
 #[cfg(feature = "ldso")]
 mod ldso;
 mod loader;
-#[cfg(feature = "std")]
 mod register;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use core::fmt::Display;
 
 pub use elf_loader::{RelocatedDylib, Symbol};
 pub use loader::ElfLibrary;
-#[cfg(feature = "std")]
-pub use register::Register;
 
 #[cfg(not(any(
     target_arch = "x86_64",
-    target_arch = "x86",
     target_arch = "aarch64",
     target_arch = "riscv64",
 )))]
 compile_error!("unsupport arch");
 
+/// dlopen-rs error type
 #[derive(Debug)]
 pub enum Error {
     /// Returned when encountered an io error.
     #[cfg(feature = "std")]
-    IOError {
-        err: std::io::Error,
-    },
-    LoaderError {
-        err: elf_loader::Error,
-    },
-    #[cfg(feature = "ldso")]
-    FindLibError {
-        msg: String,
-    },
-    #[cfg(feature = "tls")]
-    TLSError {
-        msg: &'static str,
-    },
-    RelocateError {
-        msg: String,
-    },
-    FindSymbolError {
-        msg: String,
-    },
-    ParseDynamicError {
-        msg: &'static str,
-    },
-    ParseEhdrError {
-        msg: String,
-    },
+    IOError { err: std::io::Error },
+    /// Returned when encountered a loader error.
+    LoaderError { err: elf_loader::Error },
+    /// Returned when failed to find a library.
+    FindLibError { msg: String },
 }
 
 impl Display for Error {
@@ -93,14 +70,7 @@ impl Display for Error {
             #[cfg(feature = "std")]
             Error::IOError { err } => write!(f, "{err}"),
             Error::LoaderError { err } => write!(f, "{err}"),
-            #[cfg(feature = "ldso")]
             Error::FindLibError { msg } => write!(f, "{msg}"),
-            #[cfg(feature = "tls")]
-            Error::TLSError { msg } => write!(f, "{msg}"),
-            Error::RelocateError { msg } => write!(f, "{msg}"),
-            Error::FindSymbolError { msg } => write!(f, "{msg}"),
-            Error::ParseDynamicError { msg } => write!(f, "{msg}"),
-            Error::ParseEhdrError { msg } => write!(f, "{msg}"),
         }
     }
 }
@@ -130,7 +100,6 @@ impl From<std::io::Error> for Error {
     }
 }
 
-#[cfg(feature = "ldso")]
 #[cold]
 #[inline(never)]
 fn find_lib_error(msg: impl ToString) -> Error {

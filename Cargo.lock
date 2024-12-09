@@ -215,9 +215,9 @@ checksum = "4445909572dbd556c457c849c4ca58623d84b27c8fff1e74b0b4227d8b90d17b"
 
 [[package]]
 name = "elf_loader"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b8d185d4baa29fc8d2b557b1dca71cca9522786feea49790440b86213068661"
+checksum = "3375d8e870e3f4d94889669bc217e471b822a2a29a1a95433111ea89372508ac"
 dependencies = [
  "bitflags",
  "cfg-if",
@@ -590,9 +590,9 @@ checksum = "3354b9ac3fae1ff6755cb6db53683adb661634f67557942dea4facebec0fee4b"
 
 [[package]]
 name = "unwinding"
-version = "0.2.3"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "637d511437df708cee34bdec7ba2f1548d256b7acf3ff20e0a1c559f9bf3a987"
+checksum = "e2c6cb20f236dae10c69b0b45d82ef50af8b7e45c10e429e7901d26b49b4dbf3"
 dependencies = [
  "gimli 0.31.1",
  "libc",
