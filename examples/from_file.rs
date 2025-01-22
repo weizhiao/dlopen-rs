@@ -1,17 +1,17 @@
-use dlopen_rs::ElfLibrary;
+use dlopen_rs::{ElfLibrary, OpenFlags};
 use std::path::Path;
 
 fn main() {
+	std::env::set_var("RUST_LOG", "debug");
+    env_logger::init();
+    dlopen_rs::init();
     let path = Path::new("./target/release/libexample.so");
-    let libc = ElfLibrary::sys_load("libc.so.6").unwrap();
-    let libgcc = ElfLibrary::sys_load("libgcc_s.so.1").unwrap();
+    let libc = ElfLibrary::load_existing("libc.so.6").unwrap();
+    let libgcc = ElfLibrary::load_existing("libgcc_s.so.1").unwrap();
 
-    let libexample = ElfLibrary::from_file(path, None)
+    let libexample = ElfLibrary::from_file(path, OpenFlags::RTLD_LOCAL | OpenFlags::RTLD_LAZY)
         .unwrap()
-        .register()
-        .relocate(&[libc])
-        .relocate(&[libgcc])
-        .finish()
+        .relocate(&[libc, libgcc])
         .unwrap();
 
     let add = unsafe { libexample.get::<fn(i32, i32) -> i32>("add").unwrap() };

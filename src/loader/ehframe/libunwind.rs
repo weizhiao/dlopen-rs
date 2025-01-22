@@ -1,18 +1,22 @@
 use core::{ffi::c_void, ops::Range};
-use elf_loader::Unwind;
 
 #[derive(Debug, Clone)]
 pub(crate) struct EhFrame(usize);
 
-impl Unwind for EhFrame {
-    unsafe fn new(phdr: &elf_loader::arch::Phdr, map_range: Range<usize>) -> Option<Self> {
+impl EhFrame {
+    pub(crate) fn new(phdr: &elf_loader::arch::Phdr, map_range: Range<usize>) -> Option<Self> {
         let base = map_range.start;
         let eh_frame_hdr_off = phdr.p_vaddr as usize;
         let eh_frame_hdr_size = phdr.p_memsz as usize;
         let bases =
             gimli::BaseAddresses::default().set_eh_frame_hdr((eh_frame_hdr_off + base) as _);
         let eh_frame_hdr = gimli::EhFrameHdr::new(
-            core::slice::from_raw_parts((base + eh_frame_hdr_off) as *const u8, eh_frame_hdr_size),
+            unsafe {
+                core::slice::from_raw_parts(
+                    (base + eh_frame_hdr_off) as *const u8,
+                    eh_frame_hdr_size,
+                )
+            },
             gimli::NativeEndian,
         )
         .parse(&bases, core::mem::size_of::<usize>() as _)

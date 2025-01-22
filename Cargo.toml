@@ -12,8 +12,11 @@ description = "A library for loading elf dynamic libraries from memory and files
 exclude = [".gitignore", "/test", "/example-dylib", "check.sh"]
 
 [workspace]
-members = ["example-dylib"]
+members = ["example-dylib", "cdylib"]
 resolver = "2"
+
+[workspace.dependencies]
+libc = { version = "0.2.162", default-features = false }
 
 [dependencies.spin]
 version = "0.9.8"
@@ -21,7 +24,7 @@ default-features = false
 features = ["rwlock", "lazy", "mutex", "spin_mutex"]
 
 [dependencies.unwinding]
-version = "0.2.4"
+version = "0.2.5"
 default-features = false
 features = ["fde-custom", "unwinder"]
 optional = true
@@ -36,10 +39,13 @@ optional = true
 version = '0.14'
 default-features = false
 features = ['ahash', 'inline-more']
+optional = true
+
+[dependencies.indexmap]
+version = '2.7.0'
 
 [dependencies.libc]
-version = "0.2.162"
-default-features = false
+workspace = true
 optional = true
 
 [dependencies.phf]
@@ -48,30 +54,29 @@ default-features = false
 features = ['macros']
 
 [dependencies.elf_loader]
-version = "0.3.0"
+path = "../elf_loader"
+#version = "0.3.0"
 default-features = false
 
 [dependencies]
 bitflags = "2.6.0"
 cfg-if = '1.0'
+log = "0.4.22"
 
 [features]
-default = ["tls", "ldso", "libgcc", "mmap"]
-
-# allows dynamic libraries to be loaded using system dynamic loaders(ldso)
-ldso = ["std", "dep:libc"]
+default = ["mmap", "tls", "libgcc"]
 # enable this when you want to use gdb/lldb to debug the loaded dynamic libraries
 debug = ["std"]
 # enable std
-std = ["dep:libc", "elf_loader/std"]
-# enable default implementation on devices with mmap
-mmap = ["dep:libc", "std", "elf_loader/mmap"]
-# enable this when you need to use thread local storage
-tls = ["std", "dep:libc", "elf_loader/tls"]
+std = ["elf_loader/std", "dep:libc"]
+# enable default implementation on devices with mmapl storage
+mmap = ["std", "elf_loader/mmap"]
+# enable this when you need to use thread loca
+tls = ["std"]
 # activate specific versions of symbols for dynamic library loading
 version = ["elf_loader/version"]
 # enable this when you want to use the exception handling mechanism provided by dlopen-rs
-unwinding = ["dep:unwinding"]
+unwinding = ["dep:unwinding", "dep:hashbrown"]
 # enable this when program uses libgcc to handle exceptions
 libgcc = ["dep:gimli"]
 # enable this when program uses libunwind to handle exceptions
@@ -86,6 +91,7 @@ fde-gnu-eh-frame-hdr = ["unwinding?/fde-gnu-eh-frame-hdr"]
 [dev-dependencies]
 criterion = "0.5.1"
 libloading = "0.8.5"
+env_logger = "0.11.6"
 
 [[bench]]
 name = "my_benchmark"
@@ -93,11 +99,11 @@ harness = false
 
 [[example]]
 name = "from_file"
-required-features = ["ldso", "tls", "libgcc"]
+required-features = ["tls", "libgcc"]
 
 [[example]]
 name = "from_binary"
-required-features = ["ldso", "libgcc", "tls"]
+required-features = ["libgcc", "tls"]
 
 [[example]]
 name = "relocate_with"
@@ -105,8 +111,8 @@ required-features = ["std", "tls", "libgcc"]
 
 [[example]]
 name = "unwinding"
-required-features = ["tls", "unwinding", "ldso", "fde-phdr-dl"]
+required-features = ["tls", "unwinding", "fde-phdr-dl"]
 
 [[example]]
 name = "dlopen"
-required-features = ["ldso", "libgcc", "tls"]
+required-features = ["libgcc", "tls"]

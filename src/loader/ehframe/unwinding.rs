@@ -1,6 +1,5 @@
 use core::{ops::Range, sync::atomic::AtomicBool};
 
-use elf_loader::Unwind;
 use hashbrown::{hash_table::Entry, HashTable};
 use spin::RwLock;
 use unwinding::custom_eh_frame_finder::{
@@ -10,8 +9,8 @@ use unwinding::custom_eh_frame_finder::{
 #[derive(Debug)]
 pub(crate) struct EhFrame(usize);
 
-impl Unwind for EhFrame {
-    unsafe fn new(phdr: &elf_loader::arch::Phdr, map_range: Range<usize>) -> Option<Self> {
+impl EhFrame {
+    pub(crate) fn new(phdr: &elf_loader::arch::Phdr, map_range: Range<usize>) -> Option<Self> {
         let eh_frame_hdr = map_range.start + phdr.p_vaddr as usize;
         let unwind = EhFrame(eh_frame_hdr);
         unwind.register_unwind(map_range);

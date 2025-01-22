@@ -1,9 +1,6 @@
 #[cfg(feature = "tls")]
 mod imp {
-    use elf_loader::{
-        arch::{Phdr, TLS_DTV_OFFSET},
-        ThreadLocal,
-    };
+    use elf_loader::arch::{Phdr, TLS_DTV_OFFSET};
 
     use libc::{
         pthread_getspecific, pthread_key_create, pthread_key_delete, pthread_key_t,
@@ -35,8 +32,8 @@ mod imp {
 
     const MAX_TLS_INDEX: usize = 4096;
 
-    impl ThreadLocal for ElfTls {
-        unsafe fn new(phdr: &Phdr, base: usize) -> Option<Self> {
+    impl ElfTls {
+        pub(crate) fn new(phdr: &Phdr, base: usize) -> Self {
             unsafe extern "C" fn dtor(ptr: *mut c_void) {
                 if !ptr.is_null() {
                     let layout = ptr.cast::<Layout>().read();
@@ -45,7 +42,7 @@ mod imp {
             }
 
             let mut key = MaybeUninit::uninit();
-            if pthread_key_create(key.as_mut_ptr(), Some(dtor)) != 0 {
+            if unsafe { pthread_key_create(key.as_mut_ptr(), Some(dtor)) } != 0 {
                 panic!("can not create tls");
             }
             let align = phdr.p_align as usize;
@@ -55,17 +52,17 @@ mod imp {
             size += phdr.p_memsz as usize;
             let layout = unsafe { Layout::from_size_align_unchecked(size, align) };
             let inner = Box::new(TlsInner {
-                image: (base as *const u8).add(phdr.p_vaddr as usize),
+                image: unsafe { (base as *const u8).add(phdr.p_vaddr as usize) },
                 len: phdr.p_filesz as usize,
-                key: key.assume_init(),
+                key: unsafe { key.assume_init() },
                 layout,
                 offset,
             });
             assert!((inner.as_ref() as *const _ as usize) > MAX_TLS_INDEX);
-            Some(Self { inner })
+            Self { inner }
         }
 
-        unsafe fn module_id(&self) -> usize {
+        pub(crate) fn module_id(&self) -> usize {
             self.inner.as_ref() as *const TlsInner as usize
         }
     }
@@ -108,22 +105,9 @@ mod imp {
 
 #[cfg(not(feature = "tls"))]
 mod imp {
-    use elf_loader::ThreadLocal;
-
-    #[derive(Clone)]
-    pub(crate) struct ElfTls;
-    impl ThreadLocal for ElfTls {
-        unsafe fn new(_phdr: &elf_loader::arch::Phdr, _base: usize) -> Option<Self> {
-            None
-        }
-
-        unsafe fn module_id(&self) -> usize {
-            0
-        }
-    }
-
     pub(crate) fn tls_get_addr() {}
 }
 
 pub(crate) use imp::tls_get_addr;
+#[cfg(feature = "tls")]
 pub(crate) use imp::ElfTls;

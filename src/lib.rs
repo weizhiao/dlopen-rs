@@ -34,16 +34,22 @@ extern crate alloc;
 
 #[cfg(feature = "debug")]
 mod debug;
-mod dlopen;
-#[cfg(feature = "ldso")]
-mod ldso;
+#[cfg(feature = "std")]
+pub mod dlopen;
+#[cfg(feature = "std")]
+mod init;
 mod loader;
 mod register;
 use alloc::string::{String, ToString};
+use bitflags::bitflags;
 use core::fmt::Display;
 
-pub use elf_loader::{RelocatedDylib, Symbol};
-pub use loader::ElfLibrary;
+pub use elf_loader::Symbol;
+#[cfg(feature = "std")]
+pub use init::init;
+pub use loader::{Dylib, ElfLibrary};
+#[cfg(feature = "std")]
+pub use register::dl_iterate_phdr_impl;
 
 #[cfg(not(any(
     target_arch = "x86_64",
@@ -51,6 +57,20 @@ pub use loader::ElfLibrary;
     target_arch = "riscv64",
 )))]
 compile_error!("unsupport arch");
+
+bitflags! {
+    #[derive(Clone, Copy, Debug)]
+    pub struct OpenFlags:u32{
+        const RTLD_LOCAL = 0;
+        const RTLD_LAZY = 1;
+        const RTLD_NOW= 2;
+        const RTLD_NOLOAD = 4;
+        const RTLD_DEEPBIND =8;
+        const RTLD_GLOBAL = 256;
+        const RTLD_NODELETE = 4096;
+        const CUSTOM_NOT_REGISTER = 1024;
+    }
+}
 
 /// dlopen-rs error type
 #[derive(Debug)]

@@ -1,0 +1,20 @@
+[package]
+name = "cdylib"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies.dlopen-rs]
+path = "../"
+default-features = false
+features = ["tls", "mmap", "debug", "libgcc"]
+
+[dependencies.libc]
+workspace = true
+
+[dependencies]
+ctor = "0.2.9"
+env_logger = "0.11.6"
+
+[lib]
+name = "dlopen"
+crate-type = ["cdylib"]

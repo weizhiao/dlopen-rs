@@ -5,12 +5,7 @@ cargo check -p dlopen-rs  --no-default-features --features="tls"
 cargo check -p dlopen-rs  --no-default-features --features="libgcc"
 cargo check -p dlopen-rs  --no-default-features --features="libunwind"
 cargo check -p dlopen-rs  --no-default-features --features="unwinding"
-# 检查自带的Mmap trait实现
-# cargo check -p dlopen-rs  --no-default-features --features="mmap_impl"
-# cargo check -p dlopen-rs  --no-default-features --features="no_mmap_impl"
-# cargo check -p dlopen-rs  --no-default-features --features="no_mmap_impl,std"
 # 检查其余的feature
-cargo check -p dlopen-rs  --no-default-features --features="ldso"
 cargo check -p dlopen-rs  --no-default-features --features="debug"
 cargo check -p dlopen-rs  --no-default-features --features="version"
 # 检查常规组合
