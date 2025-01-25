@@ -1,5 +1,8 @@
-use dlopen_rs::dl_iterate_phdr_impl;
-use std::ffi::{c_char, c_int, c_void};
+use dlopen_rs::dlopen::dl_iterate_phdr as dl_iterate_phdr_impl;
+use std::{
+    ffi::{c_char, c_int, c_void},
+    ptr::null,
+};
 
 #[ctor::ctor]
 fn init() {
@@ -34,4 +37,19 @@ unsafe extern "C" fn dl_iterate_phdr(
     data: *mut libc::c_void,
 ) -> c_int {
     dl_iterate_phdr_impl(callback, data)
+}
+
+#[no_mangle]
+unsafe extern "C" fn dladdr(_addr: *const c_void, _info: *mut libc::Dl_info) {
+    todo!()
+}
+
+#[no_mangle]
+unsafe extern "C" fn dlinfo(_handle: *const c_void, _request: c_int, _info: *mut c_void) {
+    todo!()
+}
+
+#[no_mangle]
+unsafe extern "C" fn dlerror() -> *const c_char {
+    null()
 }

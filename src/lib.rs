@@ -1,4 +1,5 @@
-//!A pure-rust library designed for loading ELF dynamic libraries from memory or from files.
+//!A Rust library that implements a series of interfaces such as `dlopen` and `dlsym`, consistent with the behavior of libc,
+//!providing robust support for dynamic library loading and symbol resolution.
 //!
 //!This library serves four purposes:
 //!1. Provide a pure Rust alternative to musl ld.so or glibc ld.so.
@@ -6,35 +7,29 @@
 //!3. Easily swap out symbols in shared libraries with your own custom symbols at runtime
 //!4. Faster than `ld.so` in most cases (loading dynamic libraries and getting symbols)
 //!
-//!Additional, it integrates seamlessly with the system’s dynamic linker in `std` environments when the `ldso` feature is enabled.
 //!Currently, it supports `x86_64`, `RV64`, and `AArch64` architectures.
 //!
 //! # Examples
 //! ```
-//! use dlopen_rs::ELFLibrary;
+//! use dlopen_rs::ElfLibrary;
 //! use std::path::Path;
-//! let path = Path::new("./target/release/libexample.so");
-//!	let libc = ELFLibrary::sys_load("libc.so.6").unwrap();
-//!	let libgcc = ELFLibrary::sys_load("libgcc_s.so.1").unwrap();
-//! let libexample = ELFLibrary::from_file(path, None)
-//!		.unwrap()
-//!		.relocate(&[libgcc, libc])
-//!     .finish()
-//!		.unwrap();
 //!
-//! let add = unsafe {
-//! 	libexample
-//! 	.get::<fn(i32, i32) -> i32>("add")
-//! 	.unwrap()
-//! };
-//! println!("{}", add(1,1));
+//! fn main(){
+//!     dlopen_rs::init();
+//!     let path = Path::new("./target/release/libexample.so");
+//!     let libexample = ElfLibrary::dlopen(path, OpenFlags::RTLD_LOCAL | OpenFlags::RTLD_LAZY).unwrap();
+//!
+//!     let add = unsafe {
+//! 	    libexample.get::<fn(i32, i32) -> i32>("add").unwrap()
+//!     };
+//!     println!("{}", add(1,1));
+//! }
 //! ```
 #![cfg_attr(not(feature = "std"), no_std)]
 extern crate alloc;
 
 #[cfg(feature = "debug")]
 mod debug;
-#[cfg(feature = "std")]
 pub mod dlopen;
 #[cfg(feature = "std")]
 mod init;
@@ -48,8 +43,6 @@ pub use elf_loader::Symbol;
 #[cfg(feature = "std")]
 pub use init::init;
 pub use loader::{Dylib, ElfLibrary};
-#[cfg(feature = "std")]
-pub use register::dl_iterate_phdr_impl;
 
 #[cfg(not(any(
     target_arch = "x86_64",
@@ -59,15 +52,28 @@ pub use register::dl_iterate_phdr_impl;
 compile_error!("unsupport arch");
 
 bitflags! {
+    /// Control how dynamic libraries are loaded.
     #[derive(Clone, Copy, Debug)]
     pub struct OpenFlags:u32{
+        /// This is the converse of RTLD_GLOBAL, and the default if neither flag is specified.
+        /// Symbols defined in this shared object are not made available to resolve references in subsequently loaded shared objects.
         const RTLD_LOCAL = 0;
+        /// Perform lazy binding. Resolve symbols only as the code that references them is executed.
+        /// If the symbol is never referenced, then it is never resolved.
         const RTLD_LAZY = 1;
+        /// If this value is specified, or the environment variable LD_BIND_NOW is set to a nonempty string,
+        /// all undefined symbols in the shared object are resolved before dlopen() returns.
         const RTLD_NOW= 2;
+        /// Not supported
         const RTLD_NOLOAD = 4;
+        /// Not supported
         const RTLD_DEEPBIND =8;
+        /// The symbols defined by this shared object will be made available for symbol resolution of subsequently loaded shared objects.
         const RTLD_GLOBAL = 256;
+        /// Do not unload the shared object during dlclose(). Consequently,
+        /// the object's static and global variables are not reinitialized if the object is reloaded with dlopen() at a later time.
         const RTLD_NODELETE = 4096;
+        /// dlopen-rs custom flag, true local loading, does not involve any global variable operations, no lock, and has the fastest loading speed.
         const CUSTOM_NOT_REGISTER = 1024;
     }
 }
@@ -82,6 +88,8 @@ pub enum Error {
     LoaderError { err: elf_loader::Error },
     /// Returned when failed to find a library.
     FindLibError { msg: String },
+    /// Returned when failed to find a symbol.
+    FindSymbolError { msg: String },
 }
 
 impl Display for Error {
@@ -91,6 +99,7 @@ impl Display for Error {
             Error::IOError { err } => write!(f, "{err}"),
             Error::LoaderError { err } => write!(f, "{err}"),
             Error::FindLibError { msg } => write!(f, "{msg}"),
+            Error::FindSymbolError { msg } => write!(f, "{msg}"),
         }
     }
 }
@@ -124,6 +133,14 @@ impl From<std::io::Error> for Error {
 #[inline(never)]
 fn find_lib_error(msg: impl ToString) -> Error {
     Error::FindLibError {
+        msg: msg.to_string(),
+    }
+}
+
+#[cold]
+#[inline(never)]
+fn find_symbol_error(msg: impl ToString) -> Error {
+    Error::FindSymbolError {
         msg: msg.to_string(),
     }
 }

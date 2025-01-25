@@ -1,5 +1,6 @@
 use crate::{Dylib, OpenFlags};
-use alloc::{borrow::ToOwned, string::String};
+use alloc::{borrow::ToOwned, boxed::Box, string::String, sync::Arc};
+use core::marker::PhantomData;
 use elf_loader::CoreComponent;
 use indexmap::IndexMap;
 use spin::{Lazy, RwLock};
@@ -11,49 +12,104 @@ impl Drop for Dylib<'_> {
         if self.flags.contains(OpenFlags::RTLD_NODELETE) {
             return;
         } else if self.flags.contains(OpenFlags::CUSTOM_NOT_REGISTER) {
+            log::debug!(
+                "Call the fini function from the dylib [{}]",
+                self.inner.shortname()
+            );
             unsafe { self.inner.call_fini() };
             return;
         }
-        let ref_count = self.inner.count();
+        let ref_count = self.inner.strong_count();
         // Dylib本身 + 全局
         let threshold =
-            2 + self.flags.contains(OpenFlags::RTLD_GLOBAL) as usize + self.deps.is_some() as usize;
+            2 + self.deps.is_some() as usize + self.flags.contains(OpenFlags::RTLD_GLOBAL) as usize;
         if ref_count == threshold {
+            log::info!("Destroying dylib [{}]", self.inner.shortname());
+            log::debug!(
+                "Call the fini function from the dylib [{}]",
+                self.inner.shortname()
+            );
+            unsafe { self.inner.call_fini() };
             let mut lock = MANAGER.write();
+            lock.all.shift_remove(self.inner.shortname());
             if self.flags.contains(OpenFlags::RTLD_GLOBAL) {
                 lock.global.shift_remove(self.inner.shortname());
             }
-            // 在RTLD_LOCAL的情况下这段代码会执行两次，不过影响不大
-            let drop1 = if let Some(lib) = lock.all.shift_remove(self.inner.shortname()) {
-                log::info!("Destroying dylib [{}]", self.inner.shortname());
-                if lib.new_idx == IS_RELOCATED {
+            for dep in self.deps.as_ref().unwrap().iter().skip(1) {
+                let dep_threshold = if let Some(lib) = lock.all.get(dep.shortname()) {
+                    if lib.flags.contains(OpenFlags::RTLD_NODELETE) {
+                        continue;
+                    }
+                    2 + lib.deps.is_some() as usize
+                        + lib.flags.contains(OpenFlags::RTLD_GLOBAL) as usize
+                } else {
+                    continue;
+                };
+                if dep.strong_count() == dep_threshold {
+                    log::info!("Destroying dylib [{}]", dep.shortname());
                     log::debug!(
                         "Call the fini function from the dylib [{}]",
-                        self.inner.shortname()
+                        dep.shortname()
                     );
-                    unsafe { self.inner.call_fini() };
+                    unsafe { dep.call_fini() };
+                    lock.all.shift_remove(dep.shortname());
+                    lock.global.shift_remove(self.inner.shortname());
                 }
-                Some(lib)
-            } else {
-                None
-            };
-            // 防止死锁
-            drop(lock);
-            drop(drop1);
+            }
         }
     }
 }
 
 #[derive(Clone)]
 pub(crate) struct GlobalDylib {
-    pub(crate) dylib: Dylib<'static>,
+    inner: CoreComponent,
+    flags: OpenFlags,
+    deps: Option<Arc<Box<[CoreComponent]>>>,
     pub(crate) new_idx: u8,
-	#[allow(unused)]
+    #[allow(unused)]
     pub(crate) is_mark: bool,
 }
 
 unsafe impl Send for GlobalDylib {}
 unsafe impl Sync for GlobalDylib {}
+
+impl GlobalDylib {
+    #[inline]
+    pub(crate) fn get_dylib(&self) -> Dylib<'static> {
+        debug_assert!(self.deps.is_some());
+        Dylib {
+            inner: self.inner.clone(),
+            flags: self.flags,
+            deps: self.deps.clone(),
+            _marker: PhantomData,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn set_flags(&mut self, flags: OpenFlags) {
+        self.flags = flags;
+    }
+
+    #[inline]
+    pub(crate) fn flags(&self) -> OpenFlags {
+        self.flags
+    }
+
+    #[inline]
+    pub(crate) fn core_component(&self) -> CoreComponent {
+        self.inner.clone()
+    }
+
+    #[inline]
+    pub(crate) fn core_component_ref(&self) -> &CoreComponent {
+        &self.inner
+    }
+
+    #[inline]
+    pub(crate) fn deps(&self) -> Option<&Arc<Box<[CoreComponent]>>> {
+        self.deps.as_ref()
+    }
+}
 
 pub(crate) struct Manager {
     pub(crate) all: IndexMap<String, GlobalDylib>,
@@ -67,21 +123,28 @@ pub(crate) static MANAGER: Lazy<RwLock<Manager>> = Lazy::new(|| {
     })
 });
 
-pub(crate) fn register(lib: Dylib<'static>, manager: &mut Manager, is_mark: bool, new_idx: Option<u8>) {
-    let shortname = lib.inner.shortname().to_owned();
+pub(crate) fn register(
+    core: CoreComponent,
+    flags: OpenFlags,
+    deps: Option<Arc<Box<[CoreComponent]>>>,
+    manager: &mut Manager,
+    is_mark: bool,
+    new_idx: Option<u8>,
+) {
+    let shortname = core.shortname().to_owned();
     log::debug!(
         "Trying to register a library. Name: [{}] flags:[{:?}]",
         shortname,
-        lib.flags
+        flags
     );
-    let core = lib.inner.clone();
-    let flags = lib.flags;
     manager.all.insert(
         shortname.to_owned(),
         GlobalDylib {
-            dylib: lib,
             new_idx: new_idx.unwrap_or(u8::MAX),
             is_mark,
+            inner: core.clone(),
+            flags,
+            deps,
         },
     );
     if flags.contains(OpenFlags::RTLD_GLOBAL) {
@@ -92,53 +155,12 @@ pub(crate) fn register(lib: Dylib<'static>, manager: &mut Manager, is_mark: bool
 #[cfg(feature = "std")]
 pub(crate) fn global_find(name: &str) -> Option<*const ()> {
     log::debug!("Lazy Binding [{}]", name);
-    crate::loader::builtin::BUILTIN.get(name).copied().or(MANAGER
-        .read()
-        .global
-        .values()
-        .find_map(|lib| unsafe { lib.get::<()>(name).map(|sym| sym.into_raw()).ok() }))
-}
-
-#[cfg(feature = "std")]
-pub unsafe extern "C" fn dl_iterate_phdr_impl(
-    callback: Option<
-        unsafe extern "C" fn(
-            info: *mut libc::dl_phdr_info,
-            size: libc::size_t,
-            data: *mut libc::c_void,
-        ) -> libc::c_int,
-    >,
-    data: *mut libc::c_void,
-) -> libc::c_int {
-    use libc::dl_phdr_info;
-
-    use crate::init::OLD_DL_ITERATE_PHDR;
-    let reader = MANAGER.read();
-    let mut ret = OLD_DL_ITERATE_PHDR.unwrap()(callback, data);
-    if ret != 0 {
-        return ret;
-    }
-    for lib in reader.all.values() {
-        let phdrs = lib.dylib.phdrs();
-        if phdrs.is_empty() {
-            continue;
-        }
-        let mut info = dl_phdr_info {
-            dlpi_addr: lib.dylib.base() as _,
-            dlpi_name: lib.dylib.cname().as_ptr(),
-            dlpi_phdr: phdrs.as_ptr().cast(),
-            dlpi_phnum: phdrs.len() as _,
-            dlpi_adds: reader.all.len() as _,
-            dlpi_subs: 0,
-            dlpi_tls_modid: 0,
-            dlpi_tls_data: core::ptr::null_mut(),
-        };
-        if let Some(callback) = callback {
-            ret = callback(&mut info, size_of::<dl_phdr_info>(), data);
-            if ret != 0 {
-                break;
-            }
-        }
-    }
-    ret
+    crate::loader::builtin::BUILTIN
+        .get(name)
+        .copied()
+        .or(MANAGER
+            .read()
+            .global
+            .values()
+            .find_map(|lib| unsafe { lib.get::<()>(name).map(|sym| sym.into_raw()) }))
 }

@@ -1,9 +1,9 @@
 use super::tls::tls_get_addr;
 #[cfg(feature = "std")]
-use crate::register::dl_iterate_phdr_impl;
+use crate::dlopen::dl_iterate_phdr;
 use core::ffi::c_int;
 #[cfg(not(feature = "std"))]
-fn dl_iterate_phdr_impl() {}
+fn dl_iterate_phdr() {}
 
 extern "C" fn __cxa_thread_atexit_impl() -> c_int {
     0
@@ -23,7 +23,7 @@ pub(crate) const BUILTIN: phf::Map<&'static str, *const ()> = phf::phf_map!(
     "_ITM_registerTMCloneTable"=> 0 as _,
     "_ITM_deregisterTMCloneTable"=> 0 as _,
     "__gmon_start__"=> 0 as _,
-    "dl_iterate_phdr"=> dl_iterate_phdr_impl as _,
+    "dl_iterate_phdr"=> dl_iterate_phdr as _,
 );
 
 #[cfg(feature = "unwinding")]
@@ -34,7 +34,7 @@ pub(crate) const BUILTIN: phf::Map<&'static str, *const ()> = phf::phf_map!(
     "_ITM_registerTMCloneTable"=> 0 as _,
     "_ITM_deregisterTMCloneTable"=> 0 as _,
     "__gmon_start__"=> 0 as _,
-    "dl_iterate_phdr"=> dl_iterate_phdr_impl as _,
+    "dl_iterate_phdr"=> dl_iterate_phdr as _,
     "_Unwind_Backtrace" => unwinding::abi::_Unwind_Backtrace as _,
     "_Unwind_ForcedUnwind" => unwinding::abi::_Unwind_ForcedUnwind as _,
     "_Unwind_GetLanguageSpecificData" => unwinding::abi::_Unwind_GetLanguageSpecificData as _,

@@ -5,7 +5,7 @@ use dlopen_rs::{ElfLibrary, OpenFlags};
 use libloading::Library;
 
 fn load_benchmark(c: &mut Criterion) {
-	dlopen_rs::init();
+    dlopen_rs::init();
     std::env::set_var("LD_LIBRARY_PATH", "/lib");
     let path = Path::new("./target/release/libexample.so");
     let libc = ElfLibrary::load_existing("libc.so.6").unwrap();
@@ -20,7 +20,7 @@ fn load_benchmark(c: &mut Criterion) {
     });
     c.bench_function("dlopen-rs:dlopen", |b| {
         b.iter(|| {
-            let _libexample = ElfLibrary::dlopen(path, OpenFlags::CUSTOM_NOT_REGISTER);
+            let _libexample = ElfLibrary::dlopen(path, OpenFlags::RTLD_GLOBAL).unwrap();
         })
     });
     c.bench_function("libloading:new", |b| {

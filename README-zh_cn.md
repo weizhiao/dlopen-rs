@@ -2,7 +2,10 @@
 [![](https://img.shields.io/crates/d/dlopen-rs.svg)](https://crates.io/crates/dlopen-rs)
 [![license](https://img.shields.io/crates/l/dlopen-rs.svg)](https://crates.io/crates/dlopen-rs)
 # dlopen-rs
-一个 `Rust` 库，用于从内存或文件加载 `ELF` 动态库。
+
+[文档](https://docs.rs/dlopen-rs/)
+
+一个 `Rust` 库，实现了与libc行为一致的`dlopen`，`dlsym`等一系列接口，为动态库加载和符号解析提供了支持。
 
 这个库有四个目的：
 1. 提供一个纯`Rust`编写的动态链接器。
@@ -14,7 +17,6 @@
 
 | 特性      | 是否默认开启 | 描述                                                                                               |
 | --------- | ------------ | -------------------------------------------------------------------------------------------------- |
-| ldso      | 是           | 允许使用系统动态加载器（ld.so）加载动态库。                                                        |
 | std       | 是           | 启用Rust标准库                                                                                     |
 | debug     | 否           | 启用后可以使用 gdb/lldb 调试已加载的动态库。注意，只有使用 dlopen-rs 加载的动态库才能用 gdb 调试。 |
 | mmap      | 是           | 启用在有mmap的平台上的默认实现                                                                     |  |
@@ -26,8 +28,38 @@
 ## 示例
 
 ### 示例1
-细粒度地控制动态库的加载流程,可以将动态库中需要重定位的某些函数换成自己实现的函数,并且可以手动控制是否开启符号的延迟绑定(lazy binding)。  
-下面这个例子中就是把动态库中的`malloc`替换为了`mymalloc`，且开启了延迟绑定。
+使用`dlopen`接口加载动态库，`dlopen-rs`中的`dlopen`与`libc`中的`dlopen`行为一致。此外本库使用了`log`库，你可以使用自己喜欢的库输出log，来查看dlopen-rs的工作流程，本库的例子中使用的是`env_logger`库。
+```rust
+use dlopen_rs::ELFLibrary;
+use std::path::Path;
+
+fn main() {
+    std::env::set_var("RUST_LOG", "trace");
+    env_logger::init();
+    dlopen_rs::init();
+    let path = Path::new("./target/release/libexample.so");
+    let libexample =
+        ElfLibrary::dlopen(path, OpenFlags::RTLD_LOCAL | OpenFlags::RTLD_LAZY).unwrap();
+    let add = unsafe { libexample.get::<fn(i32, i32) -> i32>("add").unwrap() };
+    println!("{}", add(1, 1));
+
+    let print = unsafe { libexample.get::<fn(&str)>("print").unwrap() };
+    print("dlopen-rs: hello world");
+}
+```
+### 示例2
+利用`LD_PRELOAD`将libc中dlopen等函数替换为本库中的实现。
+```shell
+# 将本库编译成动态库形式
+cargo build -r -p cdylib
+# 编译测试用例
+cargo build -r -p dlopen-rs --example preload
+# 使用本库中的实现替换libc中的实现
+RUST_LOG=trace LD_PRELOAD=./target/release/libdlopen.so ./target/release/examples/preload
+```
+
+### 示例3
+细粒度地控制动态库的加载流程,可以将动态库中需要重定位的某些函数换成自己实现的函数。下面这个例子中就是把动态库中的`malloc`替换为了`mymalloc`。
 ```rust
 use dlopen_rs::ELFLibrary;
 use libc::size_t;
@@ -39,20 +71,22 @@ extern "C" fn mymalloc(size: size_t) -> *mut c_void {
 }
 
 fn main() {
+    std::env::set_var("RUST_LOG", "debug");
+    env_logger::init();
+    dlopen_rs::init();
     let path = Path::new("./target/release/libexample.so");
-    let libc = ELFLibrary::sys_load("libc.so.6").unwrap();
-    let libgcc = ELFLibrary::sys_load("libgcc_s.so.1").unwrap();
+    let libc = ElfLibrary::load_existing("libc.so.6").unwrap();
+    let libgcc = ElfLibrary::load_existing("libgcc_s.so.1").unwrap();
 
-    let libexample = ELFLibrary::from_file(path, Some(true))
+    let libexample = ElfLibrary::from_file(path, OpenFlags::CUSTOM_NOT_REGISTER)
         .unwrap()
-        .relocate_with(&[libc, libgcc], |name| {
+        .relocate_with(&[libc, libgcc], &|name: &str| {
             if name == "malloc" {
                 return Some(mymalloc as _);
             } else {
                 return None;
             }
         })
-        .finish()
         .unwrap();
 
     let add = unsafe { libexample.get::<fn(i32, i32) -> i32>("add").unwrap() };
@@ -62,29 +96,12 @@ fn main() {
     print("dlopen-rs: hello world");
 }
 ```
-### 示例2
-设置加载动态库的路径和是否启用延迟绑定。
-* 当LD_BIND_NOW = 0时强制开启延迟绑定。
-* 当LD_BIND_NOW = 1时强制关闭延迟绑定。
-* 当LD_BIND_NOW未设置时由动态库自身的编译参数决定。
-```shell
-export LD_LIBRARY_PATH=/lib
-export LD_BIND_NOW = 0
-```
-使用`dlopen`接口加载动态库:
-```rust
-use dlopen_rs::ELFLibrary;
-use std::path::Path;
-
-fn main() {
-    let path = Path::new("./target/release/libexample.so");
-    let libexample = ELFLibrary::dlopen(path).unwrap();
-    let add = unsafe { libexample.get::<fn(i32, i32) -> i32>("add").unwrap() };
-    println!("{}", add(1, 1));
-
-    let print = unsafe { libexample.get::<fn(&str)>("print").unwrap() };
-    print("dlopen-rs: hello world");
-}
-```
+## 未完成
+* dladdr，dlinfo还未实现。dlerror目前只会返回NULL。
+* dlsym的RTLD_NEXT还未实现。
+* 目前还不能够在ld.so.cache中寻找依赖的动态库。
+* 在调用dlopen失败时，新加载的动态库虽然会被销毁但没有调用.fini中的函数。
+* 是否有方法能够支持更多的重定位类型。
+* 缺少在多线程高并发情况下的正确性与性能测试。
 ## 补充
-如果您在使用过程中遇到问题可以在 GitHub 上提出问题。如果`dlopen-rs`对您有帮助的话，不妨点个`star`。^V^
+如果在使用过程中遇到问题可以在 GitHub 上提出问题，十分欢迎大家为本库提交代码一起完善dlopen-rs的功能。😊

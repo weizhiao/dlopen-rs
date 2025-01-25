@@ -59,10 +59,6 @@ impl Drop for DebugInfo {
     }
 }
 
-extern "C" {
-    static mut _r_debug: Debug;
-}
-
 pub(crate) static DEBUG: Mutex<CustomDebug> = Mutex::new(CustomDebug {
     debug: null_mut(),
     tail: null_mut(),
@@ -72,9 +68,9 @@ impl DebugInfo {
     pub(crate) unsafe fn new(base: usize, name: *const i8, dynamic: usize) -> DebugInfo {
         let mut custom_debug = DEBUG.lock().unwrap();
         let tail = custom_debug.tail;
-		if custom_debug.debug.is_null(){
-			panic!("Please call init function first");
-		}
+        if custom_debug.debug.is_null() {
+            panic!("Please call init function first");
+        }
         let debug = &mut *custom_debug.debug;
         let link_map = Box::leak(Box::new(LinkMap {
             l_addr: base as _,

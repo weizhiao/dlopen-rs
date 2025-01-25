@@ -54,8 +54,7 @@ default-features = false
 features = ['macros']
 
 [dependencies.elf_loader]
-path = "../elf_loader"
-#version = "0.3.0"
+version = "0.4.0"
 default-features = false
 
 [dependencies]
@@ -64,7 +63,7 @@ cfg-if = '1.0'
 log = "0.4.22"
 
 [features]
-default = ["mmap", "tls", "libgcc"]
+default = ["mmap", "tls", "libgcc", "debug"]
 # enable this when you want to use gdb/lldb to debug the loaded dynamic libraries
 debug = ["std"]
 # enable std
@@ -98,20 +97,8 @@ name = "my_benchmark"
 harness = false
 
 [[example]]
-name = "from_file"
+name = "manaul"
 required-features = ["tls", "libgcc"]
-
-[[example]]
-name = "from_binary"
-required-features = ["libgcc", "tls"]
-
-[[example]]
-name = "relocate_with"
-required-features = ["std", "tls", "libgcc"]
-
-[[example]]
-name = "unwinding"
-required-features = ["tls", "unwinding", "fde-phdr-dl"]
 
 [[example]]
 name = "dlopen"

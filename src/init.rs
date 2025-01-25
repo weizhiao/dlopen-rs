@@ -32,8 +32,23 @@ pub(crate) struct Debug {
     pub ldbase: *mut c_void,
 }
 
-extern "C" {
-    static mut _r_debug: Debug;
+#[cfg(target_env = "gnu")]
+#[inline]
+fn get_debug_struct() -> &'static mut Debug {
+    extern "C" {
+        static mut _r_debug: Debug;
+    }
+    unsafe { &mut *addr_of_mut!(_r_debug) }
+}
+
+// 静态链接的musl中没有_dl_debug_addr这个符号，无法通过编译，因此需要生成dyn格式的可执行文件
+#[cfg(target_env = "musl")]
+#[inline]
+fn get_debug_struct() -> &'static mut Debug {
+    extern "C" {
+        static mut _dl_debug_addr: Debug;
+    }
+    unsafe { &mut *addr_of_mut!(_dl_debug_addr) }
 }
 
 pub(crate) static mut OLD_DL_ITERATE_PHDR: Option<
@@ -59,7 +74,7 @@ pub(crate) unsafe fn from_link_map(link_map: &LinkMap) -> Result<Option<Dylib>> 
     } else {
         link_map.l_addr as usize
     };
-	#[allow(unused_mut)]
+    #[allow(unused_mut)]
     let mut dynamic = dynamic.finish(base);
     #[cfg(feature = "version")]
     {
@@ -127,22 +142,28 @@ pub(crate) unsafe fn from_link_map(link_map: &LinkMap) -> Result<Option<Dylib>> 
         user_data,
     );
     let flags = OpenFlags::RTLD_NODELETE | OpenFlags::RTLD_GLOBAL;
+    let core = lib.core_component().clone();
+    let deps = Some(Arc::new(
+        vec![lib.core_component().clone()].into_boxed_slice(),
+    ));
     let dylib = Dylib {
-        inner: lib.core_component().clone(),
+        inner: core.clone(),
         flags,
-        deps: Some(Arc::new(Box::new([lib.core_component().clone()]))),
+        deps: deps.clone(),
         _marker: PhantomData,
     };
 
-    register(dylib.clone(), &mut MANAGER.write(), false, None);
+    register(core, flags, deps, &mut MANAGER.write(), false, None);
     Ok(Some(dylib))
 }
 
+/// `init` is responsible for the initialization of dlopen_rs, If you want to use the dynamic library that the program itself depends on,
+/// or want to use the debug function, please call it at the beginning. This is usually necessary.
 pub fn init() {
     ONCE.call_once(|| {
         let program_self = env::current_exe().unwrap();
         unsafe { PROGRAM_NAME = Some(program_self) };
-        let debug = unsafe { &mut *addr_of_mut!(_r_debug) };
+        let debug = get_debug_struct();
         let mut cur_map_ptr = debug.map;
         debug.map = null_mut();
         #[cfg(feature = "debug")]

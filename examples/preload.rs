@@ -1,7 +1,7 @@
 use libloading::Library;
 
 fn main() {
-    let libexample = unsafe { Library::new("./target/debug/libexample.so").unwrap() };
+    let libexample = unsafe { Library::new("./target/release/libexample.so").unwrap() };
     let add = unsafe {
         libexample
             .get::<fn(i32, i32) -> i32>("add".as_bytes())
@@ -20,6 +20,4 @@ fn main() {
 
     let backtrace = unsafe { libexample.get::<fn()>("backtrace".as_bytes()).unwrap() };
     backtrace();
-
-	let libexample = unsafe { Library::new("/lib/llvm-18/lib/libLLVM-18.so").unwrap() };
 }

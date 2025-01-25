@@ -5,7 +5,7 @@ pub(crate) mod tls;
 #[cfg(feature = "debug")]
 use super::debug::DebugInfo;
 use crate::{
-    find_lib_error,
+    find_lib_error, find_symbol_error,
     register::{register, MANAGER},
     OpenFlags, Result,
 };
@@ -15,7 +15,7 @@ use ehframe::EhFrame;
 use elf_loader::{
     abi::PT_GNU_EH_FRAME,
     arch::{ElfRela, Phdr},
-    object::ElfBinary,
+    object::{ElfBinary, ElfObject},
     segment::ElfSegments,
     CoreComponent, CoreComponentRef, ElfDylib, Loader, Symbol, UserData,
 };
@@ -26,23 +26,15 @@ pub(crate) const DEBUG_INFO_ID: u8 = 1;
 #[cfg(feature = "tls")]
 const TLS_ID: u8 = 2;
 
+#[inline]
 pub(crate) fn find_symbol<'lib, T>(
     libs: &'lib [CoreComponent],
     name: &str,
 ) -> Result<Symbol<'lib, T>> {
-    log::info!("Gets the symbol [{}] in [{}]", name, libs[0].shortname());
-    let mut iter = libs.iter().map(|lib| unsafe { lib.get::<T>(name) });
-    let mut res = iter.next().unwrap();
-    if let Ok(sym) = res {
-        return Ok(sym);
-    }
-    for sym in iter {
-        res = res.or(sym);
-        if res.is_ok() {
-            break;
-        }
-    }
-    Ok(res?)
+    log::info!("Get the symbol [{}] in [{}]", name, libs[0].shortname());
+    libs.iter()
+        .find_map(|lib| unsafe { lib.get::<T>(name) })
+        .ok_or(find_symbol_error(format!("can not find symbol:{}", name)))
 }
 
 /// An unrelocated dynamic library
@@ -105,42 +97,46 @@ pub(crate) fn deal_unknown<'scope>(
     mut deps: impl Iterator<Item = &'scope CoreComponent> + Clone,
 ) -> bool {
     #[cfg(feature = "tls")]
-    if rela.r_type() == elf_loader::arch::REL_DTPMOD as usize {
-        let r_sym = rela.r_symbol();
-        let r_off = rela.r_offset();
-        let ptr = (lib.base() + r_off) as *mut usize;
-        let cast = |core: &CoreComponent| unsafe {
-            core.user_data()
-                .get(TLS_ID)
-                .unwrap()
-                .downcast_ref::<tls::ElfTls>()
-                .unwrap_unchecked()
-                .module_id()
-        };
-        if r_sym != 0 {
-            let (dynsym, syminfo) = lib.symtab().symbol_idx(r_sym);
-            if dynsym.st_info >> 4 == elf_loader::abi::STB_LOCAL {
-                unsafe { ptr.write(cast(lib.core_component())) };
-                return true;
-            } else {
-                if let Some(id) =
-                    deps.find_map(|core| core.symtab().lookup_filter(&syminfo).map(|_| cast(core)))
-                {
-                    unsafe { ptr.write(id) };
-                    return true;
-                };
+    match rela.r_type() as _ {
+        elf_loader::arch::REL_DTPMOD => {
+            let r_sym = rela.r_symbol();
+            let r_off = rela.r_offset();
+            let ptr = (lib.base() + r_off) as *mut usize;
+            let cast = |core: &CoreComponent| unsafe {
+                core.user_data()
+                    .get(TLS_ID)
+                    .unwrap()
+                    .downcast_ref::<tls::ElfTls>()
+                    .unwrap_unchecked()
+                    .module_id()
             };
-        } else {
-            unsafe { ptr.write(cast(lib.core_component())) };
-            return true;
+            if r_sym != 0 {
+                let (dynsym, syminfo) = lib.symtab().symbol_idx(r_sym);
+                if dynsym.st_info >> 4 == elf_loader::abi::STB_LOCAL {
+                    unsafe { ptr.write(cast(lib.core_component_ref())) };
+                    return true;
+                } else {
+                    if let Some(id) = deps
+                        .find_map(|core| core.symtab().lookup_filter(&syminfo).map(|_| cast(core)))
+                    {
+                        unsafe { ptr.write(id) };
+                        return true;
+                    };
+                };
+            } else {
+                unsafe { ptr.write(cast(lib.core_component_ref())) };
+                return true;
+            }
         }
+        _ => {}
     }
     log::error!("Relocating dylib [{}] failed!", lib.name());
     false
 }
 
+#[inline]
 pub(crate) fn create_lazy_scope(
-    deps: &Arc<Box<[CoreComponent]>>,
+    deps: &[CoreComponent],
     is_lazy: bool,
 ) -> Option<Box<dyn for<'a> Fn(&'a str) -> Option<*const ()>>> {
     if is_lazy {
@@ -150,7 +146,6 @@ pub(crate) fn create_lazy_scope(
                 dep.upgrade()
                     .unwrap()
                     .get::<()>(name)
-                    .ok()
                     .map(|sym| sym.into_raw())
             })
         })
@@ -160,6 +155,26 @@ pub(crate) fn create_lazy_scope(
     }
 }
 
+fn from_impl(object: impl ElfObject, flags: OpenFlags) -> Result<ElfLibrary> {
+    let loader = Loader::<_>::new(object);
+    let lazy_bind = if flags.contains(OpenFlags::RTLD_LAZY) {
+        Some(true)
+    } else if flags.contains(OpenFlags::RTLD_NOW) {
+        Some(false)
+    } else {
+        None
+    };
+    let dylib = loader.load_dylib(lazy_bind, parse_phdr)?;
+    log::debug!(
+        "Loading dylib [{}] at address [0x{:x}-0x{:x}]",
+        dylib.name(),
+        dylib.base(),
+        dylib.base() + dylib.map_len()
+    );
+    let lib = ElfLibrary { dylib, flags };
+    Ok(lib)
+}
+
 impl ElfLibrary {
     /// Find and load a elf dynamic library from path.
     ///
@@ -167,16 +182,17 @@ impl ElfLibrary {
     /// * The absolute path to the library;
     /// * A relative (to the current working directory) path to the library.   
     ///
-    /// The `lazy_bind` argument can be used to force whether lazy binding is enabled or not
+    /// The `flags` argument can control how dynamic libraries are loaded.
     ///
     /// # Examples
     /// ```no_run
     /// # use ::dlopen_rs::ElfLibrary;
-    /// let lib = ElfLibrary::from_file("/path/to/awesome.module",Some(true))
+    /// let lib = ElfLibrary::from_file("/path/to/awesome.module", OpenFlags::RTLD_LOCAL)
     ///		.unwrap();
     /// ```
     ///
     #[cfg(feature = "std")]
+    #[inline]
     pub fn from_file(path: impl AsRef<std::ffi::OsStr>, flags: OpenFlags) -> Result<Self> {
         let path = path.as_ref().to_str().unwrap();
         let file = std::fs::File::open(path)?;
@@ -184,13 +200,14 @@ impl ElfLibrary {
     }
 
     /// Creates a new `ElfLibrary` instance from an open file handle.
-    /// The `lazy_bind` argument can be used to force whether lazy binding is enabled or not
+    /// The `flags` argument can control how dynamic libraries are loaded.
     /// # Examples
     /// ```
-    /// let file = File::open("path_to_elf").unwrap();
-    /// let lib = ElfLibrary::from_open_file(file, "my_elf_library", None).unwrap();
+    /// let file = File::open("/path/to/awesome.module").unwrap();
+    /// let lib = ElfLibrary::from_open_file(file, "/path/to/awesome.module", OpenFlags::RTLD_LOCAL).unwrap();
     /// ```
     #[cfg(feature = "std")]
+    #[inline]
     pub fn from_open_file(
         file: std::fs::File,
         path: impl AsRef<str>,
@@ -198,55 +215,30 @@ impl ElfLibrary {
     ) -> Result<ElfLibrary> {
         use elf_loader::object;
         let file = object::ElfFile::new(path.as_ref(), file);
-        let loader = Loader::<_>::new(file);
-        let lazy_bind = if flags.contains(OpenFlags::RTLD_LAZY) {
-            Some(true)
-        } else if flags.contains(OpenFlags::RTLD_NOW) {
-            Some(false)
-        } else {
-            None
-        };
-        let dylib = loader.load_dylib(lazy_bind, parse_phdr)?;
-        log::debug!(
-            "Loading dylib [{}] at address [0x{:x}-0x{:x}]",
-            path.as_ref(),
-            dylib.base(),
-            dylib.base() + dylib.map_len()
-        );
-        let lib = Self { dylib, flags };
-        Ok(lib)
+        from_impl(file, flags)
     }
 
-    /// load a elf dynamic library from bytes.
-    /// The `lazy_bind` argument can be used to force whether delayed binding is enabled or not
+    /// Load a elf dynamic library from bytes.
+    /// The `flags` argument can control how dynamic libraries are loaded.
     /// # Examples
     ///
     /// ```no_run
     /// # use ::dlopen_rs::ElfLibrary;
     /// let path = Path::new("/path/to/awesome.module");
     /// let bytes = std::fs::read(path).unwrap();
-    /// let lib = ElfLibrary::from_binary(&bytes, false).unwarp();
+    /// let lib = ElfLibrary::from_binary(&bytes, "/path/to/awesome.module", OpenFlags::RTLD_LOCAL).unwarp();
     /// ```
+    #[inline]
     pub fn from_binary(
         bytes: impl AsRef<[u8]>,
-        name: impl AsRef<str>,
+        path: impl AsRef<str>,
         flags: OpenFlags,
     ) -> Result<Self> {
-        let file = ElfBinary::new(name.as_ref(), bytes.as_ref());
-        let loader = Loader::<_>::new(file);
-        let lazy_bind = if flags.contains(OpenFlags::RTLD_LAZY) {
-            Some(true)
-        } else if flags.contains(OpenFlags::RTLD_NOW) {
-            Some(false)
-        } else {
-            None
-        };
-        let dylib = loader.load_dylib(lazy_bind, parse_phdr)?;
-        let lib = Self { dylib, flags };
-        Ok(lib)
+        let file = ElfBinary::new(path.as_ref(), bytes.as_ref());
+        from_impl(file, flags)
     }
 
-    /// Load an existing dynamic library using the name of the library
+    /// Load an existing dynamic library using the shortname of the library
     /// # Examples
     /// ```no_run
     /// # use ::dlopen_rs::ElfLibrary;
@@ -257,88 +249,104 @@ impl ElfLibrary {
             .read()
             .all
             .get(shortname)
-            .filter(|lib| lib.dylib.deps.is_some())
-            .map(|lib| lib.dylib.clone())
+            .filter(|lib| lib.deps().is_some())
+            .map(|lib| lib.get_dylib())
             .ok_or(find_lib_error(format!("{}: load fail", shortname)))
     }
 
-    /// get the name of the dependent libraries
+    /// Gets the name of the dependent libraries
     pub fn needed_libs(&self) -> &[&'static str] {
         self.dylib.needed_libs()
     }
 
-    /// Get the name of the dynamic library.
+    /// Gets the name of the dynamic library.
     pub fn name(&self) -> &str {
         self.dylib.name()
     }
 
-    pub fn shortname(&self) -> &str {
-        self.dylib.name().split('/').last().unwrap()
+    fn relocate_impl<'a, F>(self, libs: &[Dylib<'a>], find: &F) -> Result<Dylib<'a>>
+    where
+        F: for<'b> Fn(&'b str) -> Option<*const ()>,
+    {
+        let mut deps = Vec::new();
+        deps.push(unsafe { self.dylib.core_component() });
+        deps.extend(libs.iter().map(|lib| lib.inner.clone()));
+        let deps = Arc::new(deps.into_boxed_slice());
+        let lazy_scope = create_lazy_scope(&deps, self.dylib.is_lazy());
+        let core = self
+            .dylib
+            .relocate(
+                deps.clone().iter().map(|dep| dep),
+                find,
+                deal_unknown,
+                lazy_scope,
+            )?
+            .into_core_component();
+        if !self.flags.contains(OpenFlags::CUSTOM_NOT_REGISTER) {
+            register(
+                core.clone(),
+                self.flags,
+                Some(deps.clone()),
+                &mut MANAGER.write(),
+                false,
+                None,
+            );
+            Ok(Dylib {
+                inner: core,
+                flags: self.flags,
+                deps: Some(deps),
+                _marker: PhantomData,
+            })
+        } else {
+            Ok(Dylib {
+                inner: core,
+                flags: self.flags,
+                deps: Some(deps),
+                _marker: PhantomData,
+            })
+        }
     }
 
-    /// use libraries to relocate the current library
+    /// Use libraries to relocate the current library.
     /// # Examples
     /// ```no_run
     /// # use ::dlopen_rs::ElfLibrary;
-    /// let libc = ElfLibrary::sys_load("libc").unwrap();
-    /// let libgcc = ElfLibrary::sys_load("libgcc").unwrap();
-    /// let lib = ElfLibrary::from_file("/path/to/awesome.module", None)
+    /// let libc = ElfLibrary::load_existing("libc").unwrap();
+    /// let libgcc = ElfLibrary::load_existing("libgcc").unwrap();
+    /// let lib = ElfLibrary::from_file("/path/to/awesome.module", OpenFlags::RTLD_LOCAL)
     /// 	.unwrap()
-    /// 	.relocate(&[libgcc, libc])
-    ///     .finish()
-    ///		.unwrap();
+    /// 	.relocate(&[libgcc, libc]);
     /// ```
+    #[inline]
     pub fn relocate<'a>(self, libs: impl AsRef<[Dylib<'a>]>) -> Result<Dylib<'a>> {
-        let mut deps = Vec::new();
-        deps.push(unsafe { self.dylib.core_component().clone() });
-        deps.extend(libs.as_ref().iter().map(|lib| lib.inner.clone()));
-        let deps = Arc::new(deps.into_boxed_slice());
-        let lazy_scope = create_lazy_scope(&deps, self.dylib.is_lazy());
-        let dylib = Dylib {
-            inner: self
-                .dylib
-                .relocate(
-                    deps.clone().iter().map(|dep| dep),
-                    &|name| builtin::BUILTIN.get(name).copied(),
-                    deal_unknown,
-                    lazy_scope,
-                )?
-                .into_core_component(),
-            flags: self.flags,
-            deps: Some(deps.clone()),
-            _marker: PhantomData,
-        };
-        if !self.flags.contains(OpenFlags::CUSTOM_NOT_REGISTER) {
-            register(dylib.clone(), &mut MANAGER.write(), false, None);
-        }
-        Ok(dylib)
+        self.relocate_impl(libs.as_ref(), &|name| builtin::BUILTIN.get(name).copied())
     }
 
-    /// use libraries and function closure to relocate the current library
+    /// Use libraries and function closure to relocate the current library.
     /// # Examples
     ///
     /// ```no_run
     /// # use ::dlopen_rs::ElfLibrary;
     /// extern "C" fn mymalloc(size: size_t) -> *mut c_void {
     ///     println!("malloc:{}bytes", size);
-    ///     unsafe { nix::libc::malloc(size) }
+    ///     unsafe { libc::malloc(size) }
     /// }
-    /// let libc = ElfLibrary::sys_load("libc").unwrap();
-    /// let libgcc = ElfLibrary::sys_load("libgcc").unwrap();
-    /// let lib = ElfLibrary::from_file("/path/to/awesome.module", None)
+    /// let libc = ElfLibrary::load_existing("libc").unwrap();
+    /// let libgcc = ElfLibrary::load_existing("libgcc").unwrap();
+    /// let lib = ElfLibrary::from_file("/path/to/awesome.module", OpenFlags::RTLD_LOCAL)
     /// 	.unwrap()
-    /// 	.relocate_with(&[libc, libgcc], |name| {
+    /// 	.relocate_with(&[libc, libgcc], &|name| {
     ///         if name == "malloc" {
     ///	             return Some(mymalloc as _);
     ///         } else {
     ///	             return None;
     ///         }
     ///     })
-    ///     .finish()
     ///		.unwrap();
     /// ```
     /// # Note
-    /// It will use function closure to relocate current lib firstly
+    /// It will use function closure to relocate current lib firstly.
+    #[inline]
     pub fn relocate_with<'a, F>(
         self,
         libs: impl AsRef<[Dylib<'a>]>,
@@ -347,33 +355,12 @@ impl ElfLibrary {
     where
         F: for<'b> Fn(&'b str) -> Option<*const ()>,
     {
-        let mut deps = Vec::new();
-        deps.push(unsafe { self.dylib.core_component().clone() });
-        deps.extend(libs.as_ref().iter().map(|lib| lib.inner.clone()));
-        let deps = Arc::new(deps.into_boxed_slice());
-        let clourse = Box::new(func);
-        let lazy_scope = create_lazy_scope(&deps, self.dylib.is_lazy());
-        let dylib = Dylib {
-            inner: self
-                .dylib
-                .relocate(
-                    deps.clone().iter().map(|dep| dep),
-                    &|name| clourse(name).or(builtin::BUILTIN.get(name).copied()),
-                    deal_unknown,
-                    lazy_scope,
-                )?
-                .into_core_component(),
-            flags: self.flags,
-            deps: Some(deps.clone()),
-            _marker: PhantomData,
-        };
-        if !self.flags.contains(OpenFlags::CUSTOM_NOT_REGISTER) {
-            register(dylib.clone(), &mut MANAGER.write(), false, None);
-        }
-        Ok(dylib)
+        let find = |name: &str| func(name).or(builtin::BUILTIN.get(name).copied());
+        self.relocate_impl(libs.as_ref(), &find)
     }
 }
 
+/// An relocated dynamic library
 #[derive(Clone)]
 pub struct Dylib<'scope> {
     pub(crate) inner: CoreComponent,
@@ -392,16 +379,6 @@ impl Debug for Dylib<'_> {
 }
 
 impl<'scope> Dylib<'scope> {
-    /// Get dependent libraries.
-    //#[inline]
-    // pub fn dep_libs(&self) -> &[Dylib] {
-    //     if let Some(deps) = &self.deps {
-    //         deps
-    //     } else {
-    //         &[]
-    //     }
-    // }
-
     /// Get the name of the dynamic library.
     #[inline]
     pub fn name(&self) -> &str {
@@ -420,11 +397,13 @@ impl<'scope> Dylib<'scope> {
         self.inner.base()
     }
 
+    /// Get the program headers of the dynamic library.
     #[inline]
     pub fn phdrs(&self) -> &[Phdr] {
         self.inner.phdrs()
     }
 
+    /// Get the needed libs' name of the elf object.
     #[inline]
     pub fn needed_libs(&self) -> &[&str] {
         self.inner.needed_libs()
@@ -471,6 +450,8 @@ impl<'scope> Dylib<'scope> {
         name: &str,
         version: &str,
     ) -> Result<Symbol<'lib, T>> {
-        Ok(self.inner.get_version(name, version)?)
+        self.inner
+            .get_version(name, version)
+            .ok_or(find_symbol_error(format!("can not find symbol:{}", name)))
     }
 }
