@@ -71,7 +71,7 @@ default = ["mmap", "tls", "libgcc", "debug"]
 # enable this when you want to use gdb/lldb to debug the loaded dynamic libraries
 debug = ["std"]
 # enable std
-std = ["elf_loader/std", "dep:libc"]
+std = ["elf_loader/std", "dep:libc", "dep:dynamic-loader-cache"]
 # enable default implementation on devices with mmapl storage
 mmap = ["std", "elf_loader/mmap"]
 # enable this when you need to use thread loca
@@ -90,8 +90,6 @@ fde-phdr-dl = ["unwinding?/fde-phdr-dl"]
 fde-static = ["unwinding?/fde-static"]
 # see https://github.com/nbdd0121/unwinding/#baremetal
 fde-gnu-eh-frame-hdr = ["unwinding?/fde-gnu-eh-frame-hdr"]
-# enable dynamic loader cache
-ld-cache = ["std", "dep:dynamic-loader-cache"]
 
 [dev-dependencies]
 criterion = "0.5.1"
