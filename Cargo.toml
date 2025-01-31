@@ -57,6 +57,10 @@ features = ['macros']
 version = "0.4.0"
 default-features = false
 
+[dependencies.dynamic-loader-cache]
+version = "0.2.1"
+optional = true
+
 [dependencies]
 bitflags = "2.6.0"
 cfg-if = '1.0'
@@ -67,7 +71,7 @@ default = ["mmap", "tls", "libgcc", "debug"]
 # enable this when you want to use gdb/lldb to debug the loaded dynamic libraries
 debug = ["std"]
 # enable std
-std = ["elf_loader/std", "dep:libc"]
+std = ["elf_loader/std", "dep:libc", "dep:dynamic-loader-cache"]
 # enable default implementation on devices with mmapl storage
 mmap = ["std", "elf_loader/mmap"]
 # enable this when you need to use thread loca

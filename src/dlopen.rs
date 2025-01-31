@@ -272,6 +272,7 @@ pub mod imp {
         ptr::null,
         str::FromStr,
     };
+    use dynamic_loader_cache::{Cache as LdCache, Result as LdResult};
     use elf_loader::CoreComponent;
     use libc::dl_phdr_info;
     use spin::Lazy;
@@ -288,6 +289,28 @@ pub mod imp {
         ]
         .into_boxed_slice()
     });
+    static LD_CACHE: Lazy<Box<[PathBuf]>> = Lazy::new(|| {
+        build_ld_cache().unwrap_or_else(|err| {
+            log::warn!("Build ld cache failed: {}", err);
+            Box::new([])
+        })
+    });
+
+    #[inline]
+    fn build_ld_cache() -> LdResult<Box<[PathBuf]>> {
+        use std::collections::HashSet;
+
+        let cache = LdCache::load()?;
+        let unique_ld_foders = cache
+            .iter()?
+            .filter_map(LdResult::ok)
+            .map(|entry| {
+                // Since the `full_path` is always a file, we can always unwrap it
+                entry.full_path.parent().unwrap().to_owned()
+            })
+            .collect::<HashSet<_>>();
+        Ok(Vec::from_iter(unique_ld_foders).into_boxed_slice())
+    }
 
     #[inline]
     pub(crate) fn fixup_rpath(lib_path: &str, rpath: &str) -> Box<[PathBuf]> {
@@ -322,12 +345,14 @@ pub mod imp {
         lib_name: &str,
         mut f: impl FnMut(std::fs::File, std::path::PathBuf, &mut Vec<Box<[PathBuf]>>) -> Result<()>,
     ) -> Result<()> {
-        // TODO:解析ld.so.cache
-        for path in LD_LIBRARY_PATH
+        // Search order: DT_RPATH(deprecated) -> LD_LIBRARY_PATH -> DT_RUNPATH -> /etc/ld.so.cache -> /lib:/usr/lib.
+        let search_paths = LD_LIBRARY_PATH
             .iter()
             .chain(rpath_vec[cur_rpath].iter())
-            .chain(DEFAULT_PATH.iter())
-        {
+            .chain(LD_CACHE.iter())
+            .chain(DEFAULT_PATH.iter());
+
+        for path in search_paths {
             let file_path = path.join(lib_name);
             log::trace!("Try to open dependency shared object: [{:?}]", file_path);
             if let Ok(file) = std::fs::File::open(&file_path) {
