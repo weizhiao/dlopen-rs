@@ -1,6 +1,6 @@
 use crate::{
     loader::{builtin, create_lazy_scope, deal_unknown, Dylib, ElfLibrary},
-    register::{register, IS_RELOCATED, MANAGER},
+    register::{register, DylibState, MANAGER},
     OpenFlags, Result,
 };
 use alloc::{borrow::ToOwned, sync::Arc, vec::Vec};
@@ -122,8 +122,8 @@ fn dlopen_impl(
         let mut cur_rpath = None;
         for lib_name in lib_names {
             if let Some(lib) = lock.all.get_mut(*lib_name) {
-                if !lib.is_mark {
-                    lib.is_mark = true;
+                if !lib.state.is_used() {
+                    lib.state.set_used();
                     dep_libs.push(lib.core_component());
                     if flags
                         .difference(lib.flags())
@@ -163,15 +163,14 @@ fn dlopen_impl(
                         let new_lib =
                             ElfLibrary::from_open_file(file, file_path.to_str().unwrap(), flags)?;
                         let inner = unsafe { new_lib.dylib.core_component().clone() };
-                        // 最多一次性加载255个新库
-                        assert!(new_libs.len() < IS_RELOCATED as usize);
                         register(
                             inner.clone(),
                             flags,
                             None,
                             &mut lock,
-                            true,
-                            Some(new_libs.len() as _),
+                            *DylibState::default()
+                                .set_used()
+                                .set_new_idx(new_libs.len() as _),
                         );
                         dep_libs.push(inner);
                         rpath_vec.push(
@@ -210,13 +209,12 @@ fn dlopen_impl(
         let mut can_relocate = true;
         for name in names.iter().skip(item.next) {
             let lib = lock.all.get_mut(*name).unwrap();
-            let idx = lib.new_idx;
-            lib.is_mark = false;
-            item.next += 1;
-            if idx == IS_RELOCATED {
+            lib.state.set_unused();
+            let Some(idx) = lib.state.get_new_idx() else {
                 continue;
-            }
-            lib.new_idx = IS_RELOCATED;
+            };
+            lib.state.set_relocated();
+            item.next += 1;
             stack.push(item);
             stack.push(Item {
                 idx: idx as usize,
@@ -255,7 +253,13 @@ fn dlopen_impl(
         _marker: PhantomData,
     };
     //重新注册因为更新了deps
-    register(core, flags, Some(deps), &mut lock, false, None);
+    register(
+        core,
+        flags,
+        Some(deps),
+        &mut lock,
+        *DylibState::default().set_relocated(),
+    );
     Ok(res)
 }
 

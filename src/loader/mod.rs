@@ -6,7 +6,7 @@ pub(crate) mod tls;
 use super::debug::DebugInfo;
 use crate::{
     find_lib_error, find_symbol_error,
-    register::{register, MANAGER},
+    register::{register, DylibState, MANAGER},
     OpenFlags, Result,
 };
 use alloc::{boxed::Box, format, sync::Arc, vec::Vec};
@@ -15,6 +15,7 @@ use ehframe::EhFrame;
 use elf_loader::{
     abi::PT_GNU_EH_FRAME,
     arch::{ElfRela, Phdr},
+    mmap::MmapImpl,
     object::{ElfBinary, ElfObject},
     segment::ElfSegments,
     CoreComponent, CoreComponentRef, ElfDylib, Loader, Symbol, UserData,
@@ -156,7 +157,7 @@ pub(crate) fn create_lazy_scope(
 }
 
 fn from_impl(object: impl ElfObject, flags: OpenFlags) -> Result<ElfLibrary> {
-    let loader = Loader::<_>::new(object);
+    let loader = Loader::<MmapImpl>::new();
     let lazy_bind = if flags.contains(OpenFlags::RTLD_LAZY) {
         Some(true)
     } else if flags.contains(OpenFlags::RTLD_NOW) {
@@ -164,7 +165,7 @@ fn from_impl(object: impl ElfObject, flags: OpenFlags) -> Result<ElfLibrary> {
     } else {
         None
     };
-    let dylib = loader.load_dylib(lazy_bind, parse_phdr)?;
+    let dylib = loader.load_dylib(object, lazy_bind, parse_phdr)?;
     log::debug!(
         "Loading dylib [{}] at address [0x{:x}-0x{:x}]",
         dylib.name(),
@@ -288,8 +289,7 @@ impl ElfLibrary {
                 self.flags,
                 Some(deps.clone()),
                 &mut MANAGER.write(),
-                false,
-                None,
+                *DylibState::default().set_relocated(),
             );
             Ok(Dylib {
                 inner: core,

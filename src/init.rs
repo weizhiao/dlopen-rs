@@ -1,5 +1,5 @@
 use crate::{
-    register::{global_find, register, MANAGER},
+    register::{global_find, register, DylibState, MANAGER},
     Dylib, OpenFlags, Result,
 };
 use core::{
@@ -152,8 +152,13 @@ pub(crate) unsafe fn from_link_map(link_map: &LinkMap) -> Result<Option<Dylib>> 
         deps: deps.clone(),
         _marker: PhantomData,
     };
-
-    register(core, flags, deps, &mut MANAGER.write(), false, None);
+    register(
+        core,
+        flags,
+        deps,
+        &mut MANAGER.write(),
+        *DylibState::default().set_relocated(),
+    );
     Ok(Some(dylib))
 }
 

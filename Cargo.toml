@@ -16,7 +16,7 @@ members = ["example-dylib", "cdylib"]
 resolver = "2"
 
 [workspace.dependencies]
-libc = { version = "0.2.162", default-features = false }
+libc = { version = "0.2.169", default-features = false }
 
 [dependencies.spin]
 version = "0.9.8"
@@ -54,7 +54,7 @@ default-features = false
 features = ['macros']
 
 [dependencies.elf_loader]
-version = "0.4.0"
+version = "0.5.0"
 default-features = false
 
 [dependencies.dynamic-loader-cache]

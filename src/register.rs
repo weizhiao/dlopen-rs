@@ -5,8 +5,6 @@ use elf_loader::CoreComponent;
 use indexmap::IndexMap;
 use spin::{Lazy, RwLock};
 
-pub(crate) const IS_RELOCATED: u8 = u8::MAX;
-
 impl Drop for Dylib<'_> {
     fn drop(&mut self) {
         if self.flags.contains(OpenFlags::RTLD_NODELETE) {
@@ -60,14 +58,67 @@ impl Drop for Dylib<'_> {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct DylibState(u8);
+
+impl Default for DylibState {
+    fn default() -> Self {
+        Self(0)
+    }
+}
+
+impl DylibState {
+    const USED_MASK: u8 = 0b10000000;
+    const RELOCATED: u8 = 0b01111111;
+
+	#[inline]
+    pub(crate) fn set_unused(&mut self) -> &mut Self {
+        self.0 &= !Self::USED_MASK;
+        self
+    }
+
+	#[inline]
+    pub(crate) fn set_used(&mut self) -> &mut Self {
+        self.0 |= Self::USED_MASK;
+        self
+    }
+
+	#[inline]
+    pub(crate) fn is_used(&self) -> bool {
+        self.0 & Self::USED_MASK != 0
+    }
+
+	#[inline]
+    pub(crate) fn get_new_idx(&self) -> Option<u8> {
+        let remove_used_bit = self.0 & !Self::USED_MASK;
+        if remove_used_bit == Self::RELOCATED {
+            None
+        } else {
+            Some(remove_used_bit)
+        }
+    }
+
+	#[inline]
+    pub(crate) fn set_relocated(&mut self) -> &mut Self {
+        self.0 |= Self::RELOCATED;
+        self
+    }
+
+	#[allow(unused)]
+	#[inline]
+    pub(crate) fn set_new_idx(&mut self, idx: u8) -> &mut Self {
+        assert!(idx < Self::RELOCATED);
+        self.0 |= idx;
+        self
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct GlobalDylib {
     inner: CoreComponent,
     flags: OpenFlags,
     deps: Option<Arc<Box<[CoreComponent]>>>,
-    pub(crate) new_idx: u8,
-    #[allow(unused)]
-    pub(crate) is_mark: bool,
+    pub(crate) state: DylibState,
 }
 
 unsafe impl Send for GlobalDylib {}
@@ -128,8 +179,7 @@ pub(crate) fn register(
     flags: OpenFlags,
     deps: Option<Arc<Box<[CoreComponent]>>>,
     manager: &mut Manager,
-    is_mark: bool,
-    new_idx: Option<u8>,
+    state: DylibState,
 ) {
     let shortname = core.shortname().to_owned();
     log::debug!(
@@ -140,8 +190,7 @@ pub(crate) fn register(
     manager.all.insert(
         shortname.to_owned(),
         GlobalDylib {
-            new_idx: new_idx.unwrap_or(u8::MAX),
-            is_mark,
+            state,
             inner: core.clone(),
             flags,
             deps,
