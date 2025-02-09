@@ -66,8 +66,6 @@ fn dlopen_impl(
     let reader = MANAGER.read();
     // 新加载的动态库
     let mut new_libs = Vec::new();
-    #[cfg(feature = "std")]
-    let mut rpath_vec = Vec::new();
     // 检查是否是已经加载的库
     let core = if let Some(lib) = reader.all.get(shortname) {
         if lib.deps().is_some()
@@ -81,13 +79,6 @@ fn dlopen_impl(
     } else {
         let lib = f()?;
         let core = unsafe { lib.dylib.core_component().clone() };
-        #[cfg(feature = "std")]
-        rpath_vec.push(
-            lib.dylib
-                .rpath()
-                .map(|rpath| imp::fixup_rpath(lib.name(), rpath))
-                .unwrap_or(Box::new([])),
-        );
         new_libs.push(Some(lib));
         core
     };
@@ -114,7 +105,7 @@ fn dlopen_impl(
     recycler.old_global_len = lock.global.len();
 
     #[cfg(feature = "std")]
-    let mut cur_rpath_pos = 0;
+    let mut cur_newlib_pos = 0;
     // 广度优先搜索，这是规范的要求，这个循环里会加载所有需要的动态库，无论是直接依赖还是间接依赖的
     while cur_pos < dep_libs.len() {
         let lib_names: &[&str] = unsafe { core::mem::transmute(dep_libs[cur_pos].needed_libs()) };
@@ -125,6 +116,10 @@ fn dlopen_impl(
                 if !lib.state.is_used() {
                     lib.state.set_used();
                     dep_libs.push(lib.core_component());
+                    log::debug!(
+                        "Use an existing dylib: [{}]",
+                        lib.core_component_ref().shortname()
+                    );
                     if flags
                         .difference(lib.flags())
                         .contains(OpenFlags::RTLD_GLOBAL)
@@ -146,44 +141,38 @@ fn dlopen_impl(
 
             #[cfg(feature = "std")]
             {
-                let rpath = if let Some(rpath) = cur_rpath {
+                let rpath = if let Some(rpath) = &cur_rpath {
                     rpath
                 } else {
-                    let pos = cur_rpath_pos;
-                    cur_rpath = Some(pos);
-                    cur_rpath_pos += 1;
-                    pos
+                    let parent_lib = new_libs[cur_newlib_pos].as_ref().unwrap();
+                    cur_rpath = Some(
+                        parent_lib
+                            .dylib
+                            .rpath()
+                            .map(|rpath| imp::fixup_rpath(parent_lib.name(), rpath))
+                            .unwrap_or(Box::new([])),
+                    );
+                    cur_newlib_pos += 1;
+                    unsafe { cur_rpath.as_ref().unwrap_unchecked() }
                 };
 
-                imp::find_library(
-                    rpath,
-                    &mut rpath_vec,
-                    lib_name,
-                    |file, file_path, rpath_vec| {
-                        let new_lib =
-                            ElfLibrary::from_open_file(file, file_path.to_str().unwrap(), flags)?;
-                        let inner = unsafe { new_lib.dylib.core_component().clone() };
-                        register(
-                            inner.clone(),
-                            flags,
-                            None,
-                            &mut lock,
-                            *DylibState::default()
-                                .set_used()
-                                .set_new_idx(new_libs.len() as _),
-                        );
-                        dep_libs.push(inner);
-                        rpath_vec.push(
-                            new_lib
-                                .dylib
-                                .rpath()
-                                .map(|rpath| imp::fixup_rpath(new_lib.name(), rpath))
-                                .unwrap_or(Box::new([])),
-                        );
-                        new_libs.push(Some(new_lib));
-                        Ok(())
-                    },
-                )?;
+                imp::find_library(rpath, lib_name, |file, file_path| {
+                    let new_lib =
+                        ElfLibrary::from_open_file(file, file_path.to_str().unwrap(), flags)?;
+                    let inner = unsafe { new_lib.dylib.core_component().clone() };
+                    register(
+                        inner.clone(),
+                        flags,
+                        None,
+                        &mut lock,
+                        *DylibState::default()
+                            .set_used()
+                            .set_new_idx(new_libs.len() as _),
+                    );
+                    dep_libs.push(inner);
+                    new_libs.push(Some(new_lib));
+                    Ok(())
+                })?;
             }
 
             #[cfg(not(feature = "std"))]
@@ -204,9 +193,8 @@ fn dlopen_impl(
     let mut stack = Vec::new();
     stack.push(Item { idx: 0, next: 0 });
 
-    while let Some(mut item) = stack.pop() {
+    'start: while let Some(mut item) = stack.pop() {
         let names = new_libs[item.idx].as_ref().unwrap().needed_libs();
-        let mut can_relocate = true;
         for name in names.iter().skip(item.next) {
             let lib = lock.all.get_mut(*name).unwrap();
             lib.state.set_unused();
@@ -220,26 +208,22 @@ fn dlopen_impl(
                 idx: idx as usize,
                 next: 0,
             });
-            can_relocate = false;
-            break;
+            continue 'start;
         }
-        if can_relocate {
-            let iter = lock.global.values().chain(dep_libs.iter());
-
-            let reloc = |lib: ElfLibrary| {
-                log::debug!("Relocating dylib [{}]", lib.name());
-                let lazy_scope = create_lazy_scope(&dep_libs, lib.dylib.is_lazy());
-                lib.dylib
-                    .relocate(
-                        iter,
-                        &|name| builtin::BUILTIN.get(name).copied(),
-                        deal_unknown,
-                        lazy_scope,
-                    )
-                    .map(|lib| lib.into_core_component())
-            };
-            reloc(core::mem::take(&mut new_libs[item.idx]).unwrap())?;
-        }
+        let iter = lock.global.values().chain(dep_libs.iter());
+        let reloc = |lib: ElfLibrary| {
+            log::debug!("Relocating dylib [{}]", lib.name());
+            let lazy_scope = create_lazy_scope(&dep_libs, lib.dylib.is_lazy());
+            lib.dylib
+                .relocate(
+                    iter,
+                    &|name| builtin::BUILTIN.get(name).copied(),
+                    deal_unknown,
+                    lazy_scope,
+                )
+                .map(|lib| lib.into_core_component())
+        };
+        reloc(core::mem::take(&mut new_libs[item.idx]).unwrap())?;
     }
 
     let deps = Arc::new(dep_libs.into_boxed_slice());
@@ -344,15 +328,14 @@ pub mod imp {
 
     #[inline]
     pub(crate) fn find_library(
-        cur_rpath: usize,
-        rpath_vec: &mut Vec<Box<[PathBuf]>>,
+        cur_rpath: &Box<[PathBuf]>,
         lib_name: &str,
-        mut f: impl FnMut(std::fs::File, std::path::PathBuf, &mut Vec<Box<[PathBuf]>>) -> Result<()>,
+        mut f: impl FnMut(std::fs::File, &std::path::PathBuf) -> Result<()>,
     ) -> Result<()> {
         // Search order: DT_RPATH(deprecated) -> LD_LIBRARY_PATH -> DT_RUNPATH -> /etc/ld.so.cache -> /lib:/usr/lib.
         let search_paths = LD_LIBRARY_PATH
             .iter()
-            .chain(rpath_vec[cur_rpath].iter())
+            .chain(cur_rpath.iter())
             .chain(LD_CACHE.iter())
             .chain(DEFAULT_PATH.iter());
 
@@ -360,8 +343,12 @@ pub mod imp {
             let file_path = path.join(lib_name);
             log::trace!("Try to open dependency shared object: [{:?}]", file_path);
             if let Ok(file) = std::fs::File::open(&file_path) {
-                f(file, file_path, rpath_vec)?;
-                return Ok(());
+                match f(file, &file_path) {
+                    Ok(_) => return Ok(()),
+                    Err(err) => {
+                        log::debug!("Cannot load dylib: [{:?}] reason: [{:?}]", file_path, err)
+                    }
+                }
             }
         }
         Err(find_lib_error(format!("can not find file: {}", lib_name)))
