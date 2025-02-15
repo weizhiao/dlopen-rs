@@ -157,7 +157,16 @@ pub(crate) fn create_lazy_scope(
 }
 
 fn from_impl(object: impl ElfObject, flags: OpenFlags) -> Result<ElfLibrary> {
-    let loader = Loader::<MmapImpl>::new();
+    #[allow(unused_mut)]
+    let mut loader = Loader::<MmapImpl>::new();
+    #[cfg(feature = "std")]
+    unsafe {
+        loader.set_init_params(
+            crate::init::ARGC,
+            (*core::ptr::addr_of!(crate::init::ARGV)).as_ptr() as usize,
+            crate::init::ENVP,
+        )
+    };
     let lazy_bind = if flags.contains(OpenFlags::RTLD_LAZY) {
         Some(true)
     } else if flags.contains(OpenFlags::RTLD_NOW) {
@@ -214,8 +223,10 @@ impl ElfLibrary {
         path: impl AsRef<str>,
         flags: OpenFlags,
     ) -> Result<ElfLibrary> {
+        use std::os::fd::IntoRawFd;
+
         use elf_loader::object;
-        let file = object::ElfFile::new(path.as_ref(), file);
+        let file = unsafe { object::ElfFile::from_owned_fd(path.as_ref(), file.into_raw_fd()) };
         from_impl(file, flags)
     }
 

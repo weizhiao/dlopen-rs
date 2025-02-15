@@ -308,14 +308,13 @@ checksum = "4445909572dbd556c457c849c4ca58623d84b27c8fff1e74b0b4227d8b90d17b"
 
 [[package]]
 name = "elf_loader"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de7e034ebc16d5bcda6861001f025ca688123f3b1809e2bd70e2f26de8f3f985"
+version = "0.6.0"
+source = "git+https://github.com/weizhiao/elf_loader#931a8e271dbd57451bd14123ef1f945cae362971"
 dependencies = [
  "bitflags",
  "cfg-if",
  "elf",
- "libc",
+ "syscalls",
 ]
 
 [[package]]
@@ -752,6 +751,12 @@ dependencies = [
  "quote",
  "unicode-ident",
 ]
+
+[[package]]
+name = "syscalls"
+version = "0.6.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43d0e35dc7d73976a53c7e6d7d177ef804a0c0ee774ec77bcc520c2216fd7cbe"
 
 [[package]]
 name = "thiserror"

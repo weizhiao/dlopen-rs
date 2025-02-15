@@ -12,7 +12,7 @@ use elf_loader::{
     UserData,
 };
 use spin::Once;
-use std::{env, path::PathBuf, sync::Arc};
+use std::{env, ffi::CString, os::unix::ffi::OsStringExt, path::PathBuf, sync::Arc};
 
 #[repr(C)]
 pub(crate) struct LinkMap {
@@ -66,6 +66,14 @@ pub(crate) static mut OLD_DL_ITERATE_PHDR: Option<
 
 static ONCE: Once = Once::new();
 static mut PROGRAM_NAME: Option<PathBuf> = None;
+
+pub(crate) static mut ARGC: usize = 0;
+pub(crate) static mut ARGV: Vec<*mut i8> = Vec::new();
+pub(crate) static mut ENVP: usize = 0;
+
+extern "C" {
+    static environ: usize;
+}
 
 pub(crate) unsafe fn from_link_map(link_map: &LinkMap) -> Result<Option<Dylib>> {
     let dynamic = ElfRawDynamic::new(link_map.l_ld)?;
@@ -166,6 +174,17 @@ pub(crate) unsafe fn from_link_map(link_map: &LinkMap) -> Result<Option<Dylib>> 
 /// or want to use the debug function, please call it at the beginning. This is usually necessary.
 pub fn init() {
     ONCE.call_once(|| {
+        let mut argv = Vec::new();
+        for arg in env::args_os() {
+            argv.push(CString::new(arg.into_vec()).unwrap().into_raw());
+        }
+        argv.push(null_mut());
+        unsafe {
+            ARGC = argv.len();
+            ARGV = argv;
+            ENVP = environ;
+        }
+
         let program_self = env::current_exe().unwrap();
         unsafe { PROGRAM_NAME = Some(program_self) };
         let debug = get_debug_struct();

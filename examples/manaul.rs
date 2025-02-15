@@ -35,6 +35,9 @@ fn main() {
     let thread_local = unsafe { libexample1.get::<fn()>("thread_local").unwrap() };
     thread_local();
 
+	let args = unsafe { libexample1.get::<fn()>("args") }.unwrap();
+    args();
+
     drop(libexample1);
 
     let bytes = std::fs::read(path).unwrap();

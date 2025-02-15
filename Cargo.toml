@@ -54,7 +54,8 @@ default-features = false
 features = ['macros']
 
 [dependencies.elf_loader]
-version = "0.5.0"
+git = "https://github.com/weizhiao/elf_loader"
+#version = "0.6.0"
 default-features = false
 
 [dependencies.dynamic-loader-cache]
@@ -71,7 +72,7 @@ default = ["mmap", "tls", "libgcc", "debug"]
 # enable this when you want to use gdb/lldb to debug the loaded dynamic libraries
 debug = ["std"]
 # enable std
-std = ["elf_loader/std", "dep:libc", "dep:dynamic-loader-cache"]
+std = ["elf_loader/fs", "dep:libc", "dep:dynamic-loader-cache"]
 # enable default implementation on devices with mmapl storage
 mmap = ["std", "elf_loader/mmap"]
 # enable this when you need to use thread loca
