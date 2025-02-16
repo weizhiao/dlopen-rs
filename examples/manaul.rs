@@ -35,7 +35,7 @@ fn main() {
     let thread_local = unsafe { libexample1.get::<fn()>("thread_local").unwrap() };
     thread_local();
 
-	let args = unsafe { libexample1.get::<fn()>("args") }.unwrap();
+    let args = unsafe { libexample1.get::<fn()>("args") }.unwrap();
     args();
 
     drop(libexample1);
@@ -44,7 +44,7 @@ fn main() {
     let libexample2 = ElfLibrary::from_binary(
         &bytes,
         path.as_os_str().to_str().unwrap(),
-        OpenFlags::RTLD_GLOBAL,
+        OpenFlags::RTLD_GLOBAL | OpenFlags::RTLD_LAZY,
     )
     .unwrap()
     .relocate(&[libgcc, libc])

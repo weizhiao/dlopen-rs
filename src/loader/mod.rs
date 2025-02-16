@@ -10,7 +10,7 @@ use crate::{
     OpenFlags, Result,
 };
 use alloc::{boxed::Box, format, sync::Arc, vec::Vec};
-use core::{ffi::CStr, fmt::Debug, marker::PhantomData};
+use core::{ffi::CStr, fmt::Debug};
 use ehframe::EhFrame;
 use elf_loader::{
     abi::PT_GNU_EH_FRAME,
@@ -18,7 +18,7 @@ use elf_loader::{
     mmap::MmapImpl,
     object::{ElfBinary, ElfObject},
     segment::ElfSegments,
-    CoreComponent, CoreComponentRef, ElfDylib, Loader, Symbol, UserData,
+    CoreComponentRef, ElfDylib, Loader, RelocatedDylib, Symbol, UserData,
 };
 
 pub(crate) const EH_FRAME_ID: u8 = 0;
@@ -26,10 +26,11 @@ pub(crate) const EH_FRAME_ID: u8 = 0;
 pub(crate) const DEBUG_INFO_ID: u8 = 1;
 #[cfg(feature = "tls")]
 const TLS_ID: u8 = 2;
+const CLOSURE: u8 = 3;
 
 #[inline]
 pub(crate) fn find_symbol<'lib, T>(
-    libs: &'lib [CoreComponent],
+    libs: &'lib [RelocatedDylib<'static>],
     name: &str,
 ) -> Result<Symbol<'lib, T>> {
     log::info!("Get the symbol [{}] in [{}]", name, libs[0].shortname());
@@ -95,7 +96,7 @@ fn parse_phdr(
 pub(crate) fn deal_unknown<'scope>(
     rela: &ElfRela,
     lib: &ElfDylib,
-    mut deps: impl Iterator<Item = &'scope CoreComponent> + Clone,
+    mut deps: impl Iterator<Item = &'scope RelocatedDylib<'static>> + Clone,
 ) -> bool {
     #[cfg(feature = "tls")]
     match rela.r_type() as _ {
@@ -103,7 +104,7 @@ pub(crate) fn deal_unknown<'scope>(
             let r_sym = rela.r_symbol();
             let r_off = rela.r_offset();
             let ptr = (lib.base() + r_off) as *mut usize;
-            let cast = |core: &CoreComponent| unsafe {
+            let cast = |core: &elf_loader::CoreComponent| unsafe {
                 core.user_data()
                     .get(TLS_ID)
                     .unwrap()
@@ -113,13 +114,15 @@ pub(crate) fn deal_unknown<'scope>(
             };
             if r_sym != 0 {
                 let (dynsym, syminfo) = lib.symtab().symbol_idx(r_sym);
-                if dynsym.st_info >> 4 == elf_loader::abi::STB_LOCAL {
+                if dynsym.is_local() {
                     unsafe { ptr.write(cast(lib.core_component_ref())) };
                     return true;
                 } else {
-                    if let Some(id) = deps
-                        .find_map(|core| core.symtab().lookup_filter(&syminfo).map(|_| cast(core)))
-                    {
+                    if let Some(id) = deps.find_map(|lib| unsafe {
+                        lib.symtab()
+                            .lookup_filter(&syminfo)
+                            .map(|_| cast(lib.core_component_ref()))
+                    }) {
                         unsafe { ptr.write(id) };
                         return true;
                     };
@@ -137,15 +140,17 @@ pub(crate) fn deal_unknown<'scope>(
 
 #[inline]
 pub(crate) fn create_lazy_scope(
-    deps: &[CoreComponent],
+    deps: &[RelocatedDylib],
     is_lazy: bool,
 ) -> Option<Box<dyn for<'a> Fn(&'a str) -> Option<*const ()>>> {
     if is_lazy {
-        let deps_weak: Vec<CoreComponentRef> = deps.iter().map(|dep| dep.downgrade()).collect();
+        let deps_weak: Vec<CoreComponentRef> = deps
+            .iter()
+            .map(|dep| unsafe { dep.core_component_ref().downgrade() })
+            .collect();
         Some(Box::new(move |name: &str| {
             deps_weak.iter().find_map(|dep| unsafe {
-                dep.upgrade()
-                    .unwrap()
+                RelocatedDylib::from_core_component(dep.upgrade().unwrap())
                     .get::<()>(name)
                     .map(|sym| sym.into_raw())
             })
@@ -276,44 +281,36 @@ impl ElfLibrary {
         self.dylib.name()
     }
 
-    fn relocate_impl<'a, F>(self, libs: &[Dylib<'a>], find: &F) -> Result<Dylib<'a>>
+    fn relocate_impl<F>(self, libs: &[Dylib], find: &'static F) -> Result<Dylib>
     where
         F: for<'b> Fn(&'b str) -> Option<*const ()>,
     {
         let mut deps = Vec::new();
-        deps.push(unsafe { self.dylib.core_component() });
+        deps.push(unsafe { RelocatedDylib::from_core_component(self.dylib.core_component()) });
         deps.extend(libs.iter().map(|lib| lib.inner.clone()));
         let deps = Arc::new(deps.into_boxed_slice());
         let lazy_scope = create_lazy_scope(&deps, self.dylib.is_lazy());
-        let core = self
+        let cur_lib = self
             .dylib
-            .relocate(
-                deps.clone().iter().map(|dep| dep),
-                find,
-                deal_unknown,
-                lazy_scope,
-            )?
-            .into_core_component();
+            .relocate(deps.clone().iter(), find, deal_unknown, lazy_scope)?;
         if !self.flags.contains(OpenFlags::CUSTOM_NOT_REGISTER) {
             register(
-                core.clone(),
+                cur_lib.clone(),
                 self.flags,
                 Some(deps.clone()),
                 &mut MANAGER.write(),
                 *DylibState::default().set_relocated(),
             );
             Ok(Dylib {
-                inner: core,
+                inner: cur_lib,
                 flags: self.flags,
                 deps: Some(deps),
-                _marker: PhantomData,
             })
         } else {
             Ok(Dylib {
-                inner: core,
+                inner: cur_lib,
                 flags: self.flags,
                 deps: Some(deps),
-                _marker: PhantomData,
             })
         }
     }
@@ -329,7 +326,7 @@ impl ElfLibrary {
     /// 	.relocate(&[libgcc, libc]);
     /// ```
     #[inline]
-    pub fn relocate<'a>(self, libs: impl AsRef<[Dylib<'a>]>) -> Result<Dylib<'a>> {
+    pub fn relocate(self, libs: impl AsRef<[Dylib]>) -> Result<Dylib> {
         self.relocate_impl(libs.as_ref(), &|name| builtin::BUILTIN.get(name).copied())
     }
 
@@ -358,29 +355,42 @@ impl ElfLibrary {
     /// # Note
     /// It will use function closure to relocate current lib firstly.
     #[inline]
-    pub fn relocate_with<'a, F>(
-        self,
-        libs: impl AsRef<[Dylib<'a>]>,
-        func: &'a F,
-    ) -> Result<Dylib<'a>>
+    pub fn relocate_with<F>(mut self, libs: impl AsRef<[Dylib]>, func: F) -> Result<Dylib>
     where
-        F: for<'b> Fn(&'b str) -> Option<*const ()>,
+        F: for<'b> Fn(&'b str) -> Option<*const ()> + 'static,
     {
-        let find = |name: &str| func(name).or(builtin::BUILTIN.get(name).copied());
-        self.relocate_impl(libs.as_ref(), &find)
+        type Closure = Box<dyn Fn(&str) -> Option<*const ()> + 'static>;
+
+        self.dylib.user_data_mut().unwrap().insert(
+            CLOSURE,
+            Box::new(
+                Box::new(move |name: &str| func(name).or(builtin::BUILTIN.get(name).copied()))
+                    as Closure,
+            ),
+        );
+        let func_ref: &Closure = unsafe {
+            core::mem::transmute(
+                self.dylib
+                    .user_data()
+                    .get(CLOSURE)
+                    .unwrap()
+                    .downcast_ref::<Closure>()
+                    .unwrap(),
+            )
+        };
+        self.relocate_impl(libs.as_ref(), func_ref)
     }
 }
 
 /// An relocated dynamic library
 #[derive(Clone)]
-pub struct Dylib<'scope> {
-    pub(crate) inner: CoreComponent,
+pub struct Dylib {
+    pub(crate) inner: RelocatedDylib<'static>,
     pub(crate) flags: OpenFlags,
-    pub(crate) deps: Option<Arc<Box<[CoreComponent]>>>,
-    pub(crate) _marker: PhantomData<&'scope ()>,
+    pub(crate) deps: Option<Arc<Box<[RelocatedDylib<'static>]>>>,
 }
 
-impl Debug for Dylib<'_> {
+impl Debug for Dylib {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Dylib")
             .field("inner", &self.inner)
@@ -389,7 +399,7 @@ impl Debug for Dylib<'_> {
     }
 }
 
-impl<'scope> Dylib<'scope> {
+impl Dylib {
     /// Get the name of the dynamic library.
     #[inline]
     pub fn name(&self) -> &str {

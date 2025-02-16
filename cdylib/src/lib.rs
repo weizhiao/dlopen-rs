@@ -1,4 +1,4 @@
-use dlopen_rs::dlopen::dl_iterate_phdr as dl_iterate_phdr_impl;
+use dlopen_rs::abi::dl_iterate_phdr as dl_iterate_phdr_impl;
 use std::{
     ffi::{c_char, c_int, c_void},
     ptr::null,
@@ -12,17 +12,17 @@ fn init() {
 
 #[no_mangle]
 unsafe extern "C" fn dlopen(filename: *const c_char, flags: c_int) -> *const c_void {
-    dlopen_rs::dlopen::dlopen(filename, flags)
+    dlopen_rs::abi::dlopen(filename, flags)
 }
 
 #[no_mangle]
 unsafe extern "C" fn dlsym(handle: *const c_void, symbol_name: *const c_char) -> *const c_void {
-    dlopen_rs::dlopen::dlsym(handle, symbol_name)
+    dlopen_rs::abi::dlsym(handle, symbol_name)
 }
 
 #[no_mangle]
 unsafe extern "C" fn dlclose(handle: *const c_void) -> c_int {
-    dlopen_rs::dlopen::dlclose(handle)
+    dlopen_rs::abi::dlclose(handle)
 }
 
 #[no_mangle]
@@ -40,8 +40,8 @@ unsafe extern "C" fn dl_iterate_phdr(
 }
 
 #[no_mangle]
-unsafe extern "C" fn dladdr(_addr: *const c_void, _info: *mut libc::Dl_info) {
-    todo!()
+unsafe extern "C" fn dladdr(addr: *const c_void, info: *mut libc::Dl_info) -> c_int {
+    dlopen_rs::abi::dladdr(addr, info)
 }
 
 #[no_mangle]

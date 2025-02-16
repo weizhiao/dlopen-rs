@@ -54,8 +54,7 @@ default-features = false
 features = ['macros']
 
 [dependencies.elf_loader]
-git = "https://github.com/weizhiao/elf_loader"
-#version = "0.6.0"
+version = "0.7.0"
 default-features = false
 
 [dependencies.dynamic-loader-cache]

@@ -28,9 +28,12 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 extern crate alloc;
 
+#[cfg(feature = "std")]
+pub mod abi;
 #[cfg(feature = "debug")]
 mod debug;
-pub mod dlopen;
+mod dladdr;
+mod dlopen;
 #[cfg(feature = "std")]
 mod init;
 mod loader;

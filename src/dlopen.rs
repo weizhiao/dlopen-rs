@@ -4,7 +4,7 @@ use crate::{
     OpenFlags, Result,
 };
 use alloc::{borrow::ToOwned, sync::Arc, vec::Vec};
-use core::marker::PhantomData;
+use elf_loader::RelocatedDylib;
 
 impl ElfLibrary {
     /// Load a shared library from a specified path. It is the same as dlopen.
@@ -19,7 +19,7 @@ impl ElfLibrary {
     /// ```
     #[cfg(feature = "std")]
     #[inline]
-    pub fn dlopen(path: impl AsRef<std::ffi::OsStr>, flags: OpenFlags) -> Result<Dylib<'static>> {
+    pub fn dlopen(path: impl AsRef<std::ffi::OsStr>, flags: OpenFlags) -> Result<Dylib> {
         dlopen_impl(path.as_ref().to_str().unwrap(), flags, || {
             ElfLibrary::from_file(path.as_ref(), flags)
         })
@@ -60,7 +60,7 @@ fn dlopen_impl(
     path: &str,
     mut flags: OpenFlags,
     f: impl Fn() -> Result<ElfLibrary>,
-) -> Result<Dylib<'static>> {
+) -> Result<Dylib> {
     let shortname = path.split('/').last().unwrap();
     log::info!("dlopen: Try to open [{}] with [{:?}] ", path, flags);
     let reader = MANAGER.read();
@@ -75,12 +75,12 @@ fn dlopen_impl(
         {
             return Ok(lib.get_dylib());
         }
-        lib.core_component()
+        lib.relocated_dylib()
     } else {
         let lib = f()?;
-        let core = unsafe { lib.dylib.core_component().clone() };
+        let core = lib.dylib.core_component().clone();
         new_libs.push(Some(lib));
-        core
+        unsafe { RelocatedDylib::from_core_component(core) }
     };
 
     drop(reader);
@@ -115,16 +115,13 @@ fn dlopen_impl(
             if let Some(lib) = lock.all.get_mut(*lib_name) {
                 if !lib.state.is_used() {
                     lib.state.set_used();
-                    dep_libs.push(lib.core_component());
-                    log::debug!(
-                        "Use an existing dylib: [{}]",
-                        lib.core_component_ref().shortname()
-                    );
+                    dep_libs.push(lib.relocated_dylib());
+                    log::debug!("Use an existing dylib: [{}]", lib.shortname());
                     if flags
                         .difference(lib.flags())
                         .contains(OpenFlags::RTLD_GLOBAL)
                     {
-                        let shortname = lib.core_component_ref().shortname().to_owned();
+                        let shortname = lib.shortname().to_owned();
                         log::debug!(
 							"Trying to update a library. Name: [{}] Old flags:[{:?}] New flags:[{:?}]",
 							shortname,
@@ -132,7 +129,7 @@ fn dlopen_impl(
 							flags
 						);
                         lib.set_flags(flags);
-                        let core = lib.core_component();
+                        let core = lib.relocated_dylib();
                         lock.global.insert(shortname, core);
                     }
                 }
@@ -159,9 +156,9 @@ fn dlopen_impl(
                 imp::find_library(rpath, lib_name, |file, file_path| {
                     let new_lib =
                         ElfLibrary::from_open_file(file, file_path.to_str().unwrap(), flags)?;
-                    let inner = unsafe { new_lib.dylib.core_component().clone() };
+                    let inner = new_lib.dylib.core_component().clone();
                     register(
-                        inner.clone(),
+                        unsafe { RelocatedDylib::from_core_component(inner.clone()) },
                         flags,
                         None,
                         &mut lock,
@@ -169,7 +166,7 @@ fn dlopen_impl(
                             .set_used()
                             .set_new_idx(new_libs.len() as _),
                     );
-                    dep_libs.push(inner);
+                    dep_libs.push(unsafe { RelocatedDylib::from_core_component(inner) });
                     new_libs.push(Some(new_lib));
                     Ok(())
                 })?;
@@ -214,14 +211,12 @@ fn dlopen_impl(
         let reloc = |lib: ElfLibrary| {
             log::debug!("Relocating dylib [{}]", lib.name());
             let lazy_scope = create_lazy_scope(&dep_libs, lib.dylib.is_lazy());
-            lib.dylib
-                .relocate(
-                    iter,
-                    &|name| builtin::BUILTIN.get(name).copied(),
-                    deal_unknown,
-                    lazy_scope,
-                )
-                .map(|lib| lib.into_core_component())
+            lib.dylib.relocate(
+                iter,
+                &|name| builtin::BUILTIN.get(name).copied(),
+                deal_unknown,
+                lazy_scope,
+            )
         };
         reloc(core::mem::take(&mut new_libs[item.idx]).unwrap())?;
     }
@@ -234,7 +229,6 @@ fn dlopen_impl(
         inner: core.clone(),
         flags,
         deps: Some(deps.clone()),
-        _marker: PhantomData,
     };
     //重新注册因为更新了deps
     register(
@@ -249,22 +243,11 @@ fn dlopen_impl(
 
 #[cfg(feature = "std")]
 pub mod imp {
-    use super::MANAGER;
-    use crate::{
-        find_lib_error, init::OLD_DL_ITERATE_PHDR, loader::find_symbol, ElfLibrary, OpenFlags,
-        Result,
-    };
-    use core::{
-        ffi::{c_char, c_int, c_void, CStr},
-        mem::forget,
-        ptr::null,
-        str::FromStr,
-    };
+    use crate::{find_lib_error, Result};
+    use core::str::FromStr;
     use dynamic_loader_cache::{Cache as LdCache, Result as LdResult};
-    use elf_loader::CoreComponent;
-    use libc::dl_phdr_info;
     use spin::Lazy;
-    use std::{path::PathBuf, sync::Arc};
+    use std::path::PathBuf;
 
     static LD_LIBRARY_PATH: Lazy<Box<[PathBuf]>> = Lazy::new(|| {
         let library_path = std::env::var("LD_LIBRARY_PATH").unwrap_or(String::new());
@@ -353,105 +336,4 @@ pub mod imp {
         }
         Err(find_lib_error(format!("can not find file: {}", lib_name)))
     }
-
-    /// It is the same as `dl_iterate_phdr`.
-    pub unsafe extern "C" fn dl_iterate_phdr(
-        callback: Option<
-            unsafe extern "C" fn(
-                info: *mut libc::dl_phdr_info,
-                size: libc::size_t,
-                data: *mut libc::c_void,
-            ) -> libc::c_int,
-        >,
-        data: *mut libc::c_void,
-    ) -> libc::c_int {
-        let reader = MANAGER.read();
-        let mut ret = OLD_DL_ITERATE_PHDR.unwrap()(callback, data);
-        if ret != 0 {
-            return ret;
-        }
-        for lib in reader.all.values() {
-            let phdrs = lib.core_component_ref().phdrs();
-            if phdrs.is_empty() {
-                continue;
-            }
-            let mut info = dl_phdr_info {
-                dlpi_addr: lib.core_component_ref().base() as _,
-                dlpi_name: lib.core_component_ref().cname().as_ptr(),
-                dlpi_phdr: phdrs.as_ptr().cast(),
-                dlpi_phnum: phdrs.len() as _,
-                dlpi_adds: reader.all.len() as _,
-                dlpi_subs: 0,
-                dlpi_tls_modid: 0,
-                dlpi_tls_data: core::ptr::null_mut(),
-            };
-            if let Some(callback) = callback {
-                ret = callback(&mut info, size_of::<dl_phdr_info>(), data);
-                if ret != 0 {
-                    break;
-                }
-            }
-        }
-        ret
-    }
-
-    /// It is the same as `dlopen`.
-    pub unsafe fn dlopen(filename: *const c_char, flags: c_int) -> *const c_void {
-        let mut lib = if filename.is_null() {
-            MANAGER.read().all.get_index(0).unwrap().1.get_dylib()
-        } else {
-            let flags = OpenFlags::from_bits_retain(flags as _);
-            let filename = core::ffi::CStr::from_ptr(filename);
-            let path = filename.to_str().unwrap();
-            if let Ok(lib) = ElfLibrary::dlopen(path, flags) {
-                lib
-            } else {
-                return null();
-            }
-        };
-        Arc::into_raw(core::mem::take(&mut lib.deps).unwrap()) as _
-    }
-
-    /// It is the same as `dlsym`.
-    pub unsafe fn dlsym(handle: *const c_void, symbol_name: *const c_char) -> *const c_void {
-        const RTLD_DEFAULT: usize = 0;
-        const RTLD_NEXT: usize = usize::MAX;
-        let value = handle as usize;
-        let name = CStr::from_ptr(symbol_name).to_str().unwrap_unchecked();
-        let sym = if value == RTLD_DEFAULT {
-            log::info!("dlsym: Use RTLD_DEFAULT flag to find symbol [{}]", name);
-            MANAGER
-                .read()
-                .global
-                .values()
-                .find_map(|lib| lib.get::<()>(name).map(|v| v.into_raw()))
-        } else if value == RTLD_NEXT {
-            todo!("RTLD_NEXT is not supported")
-        } else {
-            let libs = Arc::from_raw(handle as *const Box<[CoreComponent]>);
-            let symbol = find_symbol::<()>(&libs, name)
-                .ok()
-                .map(|sym| sym.into_raw());
-            forget(libs);
-            symbol
-        };
-        sym.unwrap_or(null()).cast()
-    }
-
-    /// It is the same as `dlclose`.
-    pub unsafe fn dlclose(handle: *const c_void) -> c_int {
-        let deps = Arc::from_raw(handle as *const Box<[CoreComponent]>);
-        let dylib = MANAGER
-            .read()
-            .all
-            .get(deps[0].shortname())
-            .unwrap()
-            .get_dylib();
-        drop(deps);
-        log::info!("dlclose: Closing [{}]", dylib.name());
-        0
-    }
 }
-
-#[cfg(feature = "std")]
-pub use imp::*;

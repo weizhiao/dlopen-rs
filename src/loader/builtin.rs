@@ -1,6 +1,6 @@
 use super::tls::tls_get_addr;
 #[cfg(feature = "std")]
-use crate::dlopen::dl_iterate_phdr;
+use crate::abi::dl_iterate_phdr;
 use core::ffi::c_int;
 #[cfg(not(feature = "std"))]
 fn dl_iterate_phdr() {}

@@ -308,8 +308,7 @@ checksum = "4445909572dbd556c457c849c4ca58623d84b27c8fff1e74b0b4227d8b90d17b"
 
 [[package]]
 name = "elf_loader"
-version = "0.6.0"
-source = "git+https://github.com/weizhiao/elf_loader#931a8e271dbd57451bd14123ef1f945cae362971"
+version = "0.7.0"
 dependencies = [
  "bitflags",
  "cfg-if",

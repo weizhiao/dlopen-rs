@@ -1,4 +1,4 @@
-use crate::init::{Debug, LinkMap};
+use crate::init::{GDBDebug, LinkMap};
 use core::{
     ffi::{c_int, CStr},
     ptr::null_mut,
@@ -10,7 +10,7 @@ const RT_CONSISTENT: c_int = 0;
 const RT_DELETE: c_int = 2;
 
 pub(crate) struct CustomDebug {
-    pub debug: *mut Debug,
+    pub debug: *mut GDBDebug,
     pub tail: *mut LinkMap,
 }
 
@@ -97,4 +97,11 @@ impl DebugInfo {
             link_map: Box::from_raw(link_map),
         }
     }
+}
+
+#[inline]
+pub(crate) fn init_debug(debug: *mut GDBDebug){
+	let mut custom = DEBUG.lock().unwrap();
+	custom.debug = debug;
+	custom.tail = null_mut();
 }
