@@ -1,6 +1,6 @@
 [package]
 name = "dlopen-rs"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 authors = ["wzhao <1207410841@qq.com>"]
 readme = "README.md"
@@ -8,7 +8,7 @@ repository = "https://github.com/weizhiao/dlopen-rs"
 keywords = ["dlopen", "elf", "unix", "loader"]
 categories = ["no-std", "os", "embedded"]
 license = "Apache-2.0"
-description = "A library that implements a series of interfaces such as `dlopen` and `dlsym`, consistent with the behavior of libc, providing robust support for dynamic library loading and symbol resolution."
+description = "A safe and efficient Rust implementation of dynamic library loading."
 exclude = [".gitignore", "/test", "/example-dylib", "check.sh"]
 
 [workspace]
