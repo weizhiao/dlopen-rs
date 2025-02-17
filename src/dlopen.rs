@@ -48,7 +48,7 @@ struct Recycler {
 impl Drop for Recycler {
     fn drop(&mut self) {
         if self.is_recycler {
-            log::debug!("Destroying newly added dynamic libraries");
+            log::debug!("Destroying newly added dynamic libraries from the global");
             let mut lock = MANAGER.write();
             lock.all.truncate(self.old_all_len);
             lock.global.truncate(self.old_global_len);
@@ -56,39 +56,37 @@ impl Drop for Recycler {
     }
 }
 
-fn dlopen_impl(
-    path: &str,
-    mut flags: OpenFlags,
-    f: impl Fn() -> Result<ElfLibrary>,
-) -> Result<Dylib> {
+fn dlopen_impl(path: &str, flags: OpenFlags, f: impl Fn() -> Result<ElfLibrary>) -> Result<Dylib> {
     let shortname = path.split('/').last().unwrap();
     log::info!("dlopen: Try to open [{}] with [{:?}] ", path, flags);
     let reader = MANAGER.read();
     // 新加载的动态库
     let mut new_libs = Vec::new();
-    // 检查是否是已经加载的库
-    let core = if let Some(lib) = reader.all.get(shortname) {
-        if lib.deps().is_some()
-            && !flags
-                .difference(lib.flags())
-                .contains(OpenFlags::RTLD_GLOBAL)
-        {
-            return Ok(lib.get_dylib());
-        }
-        lib.relocated_dylib()
-    } else {
+    let core = if flags.contains(OpenFlags::CUSTOM_NOT_REGISTER) {
         let lib = f()?;
         let core = lib.dylib.core_component().clone();
         new_libs.push(Some(lib));
         unsafe { RelocatedDylib::from_core_component(core) }
+    } else {
+        // 检查是否是已经加载的库
+        if let Some(lib) = reader.all.get(shortname) {
+            if lib.deps().is_some()
+                && !flags
+                    .difference(lib.flags())
+                    .contains(OpenFlags::RTLD_GLOBAL)
+            {
+                return Ok(lib.get_dylib());
+            }
+            lib.relocated_dylib()
+        } else {
+            let lib = f()?;
+            let core = lib.dylib.core_component().clone();
+            new_libs.push(Some(lib));
+            unsafe { RelocatedDylib::from_core_component(core) }
+        }
     };
 
     drop(reader);
-
-    if flags.contains(OpenFlags::CUSTOM_NOT_REGISTER) {
-        log::warn!("dlopen ignores the open flag CUSTOM_NOT_REGISTER");
-        flags.remove(OpenFlags::CUSTOM_NOT_REGISTER);
-    }
 
     let mut recycler = Recycler {
         is_recycler: true,
@@ -222,7 +220,9 @@ fn dlopen_impl(
     }
 
     let deps = Arc::new(dep_libs.into_boxed_slice());
-    recycler.is_recycler = false;
+    if !flags.contains(OpenFlags::CUSTOM_NOT_REGISTER) {
+        recycler.is_recycler = false;
+    }
     let core = deps[0].clone();
 
     let res = Dylib {
