@@ -97,10 +97,12 @@ fn dlopen_impl(path: &str, flags: OpenFlags, f: impl Fn() -> Result<ElfLibrary>)
     // 用于保存所有的依赖库
     let mut dep_libs = Vec::new();
     let mut cur_pos = 0;
-    dep_libs.push(core);
+    dep_libs.push(core.clone());
     let mut lock = MANAGER.write();
     recycler.old_all_len = lock.all.len();
     recycler.old_global_len = lock.global.len();
+
+    register(core, flags, None, &mut lock, DylibState::default());
 
     #[cfg(feature = "std")]
     let mut cur_newlib_pos = 0;
