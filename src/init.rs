@@ -1,6 +1,7 @@
 use crate::{
+    dl_iterate_phdr::CallBack,
     register::{global_find, register, DylibState, MANAGER},
-    OpenFlags, Result,
+    DlPhdrInfo, OpenFlags, Result,
 };
 use core::{
     ffi::{c_char, c_int, c_void, CStr},
@@ -11,7 +12,7 @@ use elf_loader::{
     arch::{Dyn, Phdr},
     dynamic::ElfRawDynamic,
     segment::{ElfSegments, MASK, PAGE_SIZE},
-    set_global_scope, RelocatedDylib, UserData,
+    set_global_scope, RelocatedDylib, Symbol, UserData,
 };
 use spin::Once;
 use std::{env, ffi::CString, os::unix::ffi::OsStringExt, path::PathBuf, sync::Arc};
@@ -134,19 +135,10 @@ pub(crate) unsafe fn from_raw(
     Ok(Some(lib))
 }
 
-type IterPhdr = extern "C" fn(
-    callback: Option<
-        unsafe extern "C" fn(
-            info: *mut libc::dl_phdr_info,
-            size: libc::size_t,
-            data: *mut c_void,
-        ) -> c_int,
-    >,
-    data: *mut c_void,
-) -> c_int;
+type IterPhdr = extern "C" fn(callback: Option<CallBack>, data: *mut c_void) -> c_int;
 
 // 寻找libc中的dl_iterate_phdr函数
-fn find_phdr_iter(start: *const LinkMap) -> Option<IterPhdr> {
+fn iterate_phdr(start: *const LinkMap, mut f: impl FnMut(Symbol<IterPhdr>)) {
     let mut cur_map_ptr = start;
     while !cur_map_ptr.is_null() {
         let cur_map = unsafe { &*cur_map_ptr };
@@ -155,16 +147,13 @@ fn find_phdr_iter(start: *const LinkMap) -> Option<IterPhdr> {
             unsafe { from_raw(name, cur_map.l_addr as usize, cur_map.l_ld, None).unwrap() }
         {
             if lib.name().contains("libc.so") {
-                unsafe {
-                    return core::mem::transmute(
-                        lib.get::<IterPhdr>("dl_iterate_phdr").unwrap().into_raw(),
-                    );
-                };
+                f(unsafe { lib.get::<IterPhdr>("dl_iterate_phdr").unwrap() });
+                return;
             }
         };
         cur_map_ptr = cur_map.l_next;
     }
-    None
+    panic!("can not find libc's dl_iterate_phdr");
 }
 
 fn init_argv() {
@@ -180,11 +169,7 @@ fn init_argv() {
     }
 }
 
-unsafe extern "C" fn callback(
-    info: *mut libc::dl_phdr_info,
-    _size: libc::size_t,
-    _data: *mut c_void,
-) -> c_int {
+unsafe extern "C" fn callback(info: *mut DlPhdrInfo, _size: usize, _data: *mut c_void) -> c_int {
     let info = unsafe { &*info };
     let base = info.dlpi_addr as usize;
     let phdrs = core::slice::from_raw_parts(info.dlpi_phdr, info.dlpi_phnum as usize);
@@ -245,11 +230,11 @@ pub fn init() {
         let program_self = env::current_exe().unwrap();
         unsafe { PROGRAM_NAME = Some(program_self) };
         let debug = get_debug_struct();
-        let iter = find_phdr_iter(debug.map).unwrap();
-        debug.map = null_mut();
-        #[cfg(feature = "debug")]
-        crate::debug::init_debug(debug);
-        iter(Some(callback), null_mut());
+        iterate_phdr(debug.map, |iter| {
+            #[cfg(feature = "debug")]
+            crate::debug::init_debug(debug);
+            iter(Some(callback), null_mut());
+        });
         unsafe { set_global_scope(global_find as _) };
         log::info!("Initialization is complete");
     });

@@ -281,7 +281,7 @@ impl ElfLibrary {
         self.dylib.name()
     }
 
-    fn relocate_impl<F>(self, libs: &[Dylib], find: &'static F) -> Result<Dylib>
+    fn relocate_impl<F>(self, libs: &[Dylib], find: &F) -> Result<Dylib>
     where
         F: for<'b> Fn(&'b str) -> Option<*const ()>,
     {
@@ -290,9 +290,14 @@ impl ElfLibrary {
         deps.extend(libs.iter().map(|lib| lib.inner.clone()));
         let deps = Arc::new(deps.into_boxed_slice());
         let lazy_scope = create_lazy_scope(&deps, self.dylib.is_lazy());
-        let cur_lib = self
-            .dylib
-            .relocate(deps.clone().iter(), find, deal_unknown, lazy_scope)?;
+        let cur_lib: RelocatedDylib<'static> = unsafe {
+            core::mem::transmute(self.dylib.relocate(
+                deps.iter(),
+                find,
+                deal_unknown,
+                lazy_scope,
+            )?)
+        };
         if !self.flags.contains(OpenFlags::CUSTOM_NOT_REGISTER) {
             register(
                 cur_lib.clone(),

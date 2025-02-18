@@ -54,7 +54,7 @@ default-features = false
 features = ['macros']
 
 [dependencies.elf_loader]
-version = "0.7.0"
+version = "0.8.0"
 default-features = false
 
 [dependencies.dynamic-loader-cache]
@@ -71,11 +71,11 @@ default = ["mmap", "tls", "libgcc", "debug"]
 # enable this when you want to use gdb/lldb to debug the loaded dynamic libraries
 debug = ["std"]
 # enable std
-std = ["elf_loader/fs", "dep:libc", "dep:dynamic-loader-cache"]
+std = ["elf_loader/fs", "dep:dynamic-loader-cache"]
 # enable default implementation on devices with mmapl storage
 mmap = ["std", "elf_loader/mmap"]
 # enable this when you need to use thread loca
-tls = ["std"]
+tls = ["std", "dep:libc"]
 # activate specific versions of symbols for dynamic library loading
 version = ["elf_loader/version"]
 # enable this when you want to use the exception handling mechanism provided by dlopen-rs

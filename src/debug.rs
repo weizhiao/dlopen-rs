@@ -100,8 +100,9 @@ impl DebugInfo {
 }
 
 #[inline]
-pub(crate) fn init_debug(debug: *mut GDBDebug){
-	let mut custom = DEBUG.lock().unwrap();
-	custom.debug = debug;
-	custom.tail = null_mut();
+pub(crate) fn init_debug(debug: &mut GDBDebug) {
+    debug.map = null_mut();
+    let mut custom = DEBUG.lock().unwrap();
+    custom.debug = debug;
+    custom.tail = null_mut();
 }

@@ -30,7 +30,7 @@
 ### 示例1
 使用`dlopen`接口加载动态库，`dlopen-rs`中的`dlopen`与`libc`中的`dlopen`行为一致。此外本库使用了`log`库，你可以使用自己喜欢的库输出log，来查看dlopen-rs的工作流程，本库的例子中使用的是`env_logger`库。
 ```rust
-use dlopen_rs::ELFLibrary;
+use dlopen_rs::{ElfLibrary, OpenFlags};
 use std::path::Path;
 
 fn main() {
@@ -45,6 +45,18 @@ fn main() {
 
     let print = unsafe { libexample.get::<fn(&str)>("print").unwrap() };
     print("dlopen-rs: hello world");
+
+	let dl_info = ElfLibrary::dladdr(print.into_raw() as usize).unwrap();
+    println!("{:?}", dl_info);
+
+    ElfLibrary::dl_iterate_phdr(|info| {
+        println!(
+            "iterate dynamic library: {}",
+            unsafe { CStr::from_ptr(info.dlpi_name).to_str().unwrap() }
+        );
+        Ok(())
+    })
+    .unwrap();
 }
 ```
 ### 示例2
@@ -61,7 +73,7 @@ RUST_LOG=trace LD_PRELOAD=./target/release/libdlopen.so ./target/release/example
 ### 示例3
 细粒度地控制动态库的加载流程,可以将动态库中需要重定位的某些函数换成自己实现的函数。下面这个例子中就是把动态库中的`malloc`替换为了`mymalloc`。
 ```rust
-use dlopen_rs::ELFLibrary;
+use dlopen_rs::{ElfLibrary, OpenFlags};
 use libc::size_t;
 use std::{ffi::c_void, path::Path};
 
@@ -97,7 +109,7 @@ fn main() {
 }
 ```
 ## 未完成
-* dladdr，dlinfo还未实现。dlerror目前只会返回NULL。
+* dlinfo还未实现。dlerror目前只会返回NULL。
 * dlsym的RTLD_NEXT还未实现。
 * 在调用dlopen失败时，新加载的动态库虽然会被销毁但没有调用.fini中的函数。
 * 是否有方法能够支持更多的重定位类型。

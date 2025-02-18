@@ -8,9 +8,6 @@ path = "../"
 default-features = false
 features = ["tls", "mmap", "debug", "libgcc"]
 
-[dependencies.libc]
-workspace = true
-
 [dependencies]
 ctor = "0.2.9"
 env_logger = "0.11.6"

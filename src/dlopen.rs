@@ -4,6 +4,7 @@ use crate::{
     OpenFlags, Result,
 };
 use alloc::{borrow::ToOwned, sync::Arc, vec::Vec};
+use core::ffi::{c_char, c_int, c_void};
 use elf_loader::RelocatedDylib;
 
 impl ElfLibrary {
@@ -338,4 +339,27 @@ pub mod imp {
         }
         Err(find_lib_error(format!("can not find file: {}", lib_name)))
     }
+}
+
+#[allow(unused_variables)]
+/// It is the same as `dlopen`.
+pub unsafe extern "C" fn dlopen(filename: *const c_char, flags: c_int) -> *const c_void {
+    let mut lib = if filename.is_null() {
+        MANAGER.read().all.get_index(0).unwrap().1.get_dylib()
+    } else {
+        #[cfg(feature = "std")]
+        {
+            let flags = OpenFlags::from_bits_retain(flags as _);
+            let filename = core::ffi::CStr::from_ptr(filename);
+            let path = filename.to_str().unwrap();
+            if let Ok(lib) = ElfLibrary::dlopen(path, flags) {
+                lib
+            } else {
+                return core::ptr::null();
+            }
+        }
+        #[cfg(not(feature = "std"))]
+        return core::ptr::null();
+    };
+    Arc::into_raw(core::mem::take(&mut lib.deps).unwrap()) as _
 }

@@ -49,6 +49,18 @@ fn main() {
 
     let print = unsafe { libexample.get::<fn(&str)>("print").unwrap() };
     print("dlopen-rs: hello world");
+	
+	let dl_info = ElfLibrary::dladdr(print.into_raw() as usize).unwrap();
+    println!("{:?}", dl_info);
+
+    ElfLibrary::dl_iterate_phdr(|info| {
+        println!(
+            "iterate dynamic library: {}",
+            unsafe { CStr::from_ptr(info.dlpi_name).to_str().unwrap() }
+        );
+        Ok(())
+    })
+    .unwrap();
 }
 ```
 
@@ -105,7 +117,7 @@ fn main() {
 ```
 
 ## TODO
-* dladdr and dlinfo have not been implemented yet. dlerror currently only returns NULL.  
+* dlinfo have not been implemented yet. dlerror currently only returns NULL.  
 * RTLD_NEXT for dlsym has not been implemented.
 * When dlopen fails, the newly loaded dynamic library is destroyed, but the functions in .fini are not called.
 * It is unclear whether there is a way to support more relocation types.

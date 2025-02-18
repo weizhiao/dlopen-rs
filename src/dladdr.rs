@@ -1,5 +1,17 @@
 use crate::{register::MANAGER, Dylib, ElfLibrary};
-use core::{ffi::CStr, fmt::Debug};
+use core::{
+    ffi::{c_char, c_int, c_void, CStr},
+    fmt::Debug,
+    ptr::null,
+};
+
+#[repr(C)]
+pub struct CDlinfo {
+    pub dli_fname: *const c_char,
+    pub dli_fbase: *mut c_void,
+    pub dli_sname: *const c_char,
+    pub dli_saddr: *mut c_void,
+}
 
 pub struct DlInfo {
     /// dylib
@@ -86,5 +98,19 @@ impl ElfLibrary {
             }
             dl_info
         })
+    }
+}
+
+/// It is the same as `dladdr`.
+pub unsafe extern "C" fn dladdr(addr: *const c_void, info: *mut CDlinfo) -> c_int {
+    if let Some(dl_info) = ElfLibrary::dladdr(addr as usize) {
+        let info = &mut *info;
+        info.dli_fbase = dl_info.dylib().base() as _;
+        info.dli_fname = dl_info.dylib().cname().as_ptr();
+        info.dli_saddr = dl_info.symbol_addr().unwrap_or(0) as _;
+        info.dli_sname = dl_info.symbol_name().map_or(null(), |s| s.as_ptr());
+        1
+    } else {
+        0
     }
 }

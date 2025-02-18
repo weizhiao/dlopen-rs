@@ -28,20 +28,23 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 extern crate alloc;
 
-#[cfg(feature = "std")]
 pub mod abi;
 #[cfg(feature = "debug")]
 mod debug;
+mod dl_iterate_phdr;
+mod dlsym;
 mod dladdr;
 mod dlopen;
 #[cfg(feature = "std")]
 mod init;
 mod loader;
 mod register;
-use alloc::string::{String, ToString};
+use alloc::{boxed::Box, string::{String, ToString}};
 use bitflags::bitflags;
-use core::fmt::Display;
+use core::{any::Any, fmt::Display};
 
+pub use dl_iterate_phdr::DlPhdrInfo;
+pub use dladdr::CDlinfo;
 pub use elf_loader::Symbol;
 #[cfg(feature = "std")]
 pub use init::init;
@@ -93,6 +96,8 @@ pub enum Error {
     FindLibError { msg: String },
     /// Returned when failed to find a symbol.
     FindSymbolError { msg: String },
+    /// Returned when failed to iterate phdr.
+    IteratorPhdrError { err: Box<dyn Any> },
 }
 
 impl Display for Error {
@@ -103,6 +108,7 @@ impl Display for Error {
             Error::LoaderError { err } => write!(f, "{err}"),
             Error::FindLibError { msg } => write!(f, "{msg}"),
             Error::FindSymbolError { msg } => write!(f, "{msg}"),
+            Error::IteratorPhdrError { err } => write!(f, "{:?}", err),
         }
     }
 }

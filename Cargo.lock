@@ -116,7 +116,6 @@ dependencies = [
  "ctor",
  "dlopen-rs",
  "env_logger",
- "libc",
 ]
 
 [[package]]
@@ -308,9 +307,9 @@ checksum = "4445909572dbd556c457c849c4ca58623d84b27c8fff1e74b0b4227d8b90d17b"
 
 [[package]]
 name = "elf_loader"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c62996f995c6b71e851c71d8c72df579eba81e10fe4e8aa1f5a5b307608e410d"
+checksum = "e5bf7fcaa063be7fd97d78cd2684b081568eff2d6bae1b6396db97beb22ff298"
 dependencies = [
  "bitflags",
  "cfg-if",
