@@ -95,10 +95,22 @@ fde-gnu-eh-frame-hdr = ["unwinding?/fde-gnu-eh-frame-hdr"]
 criterion = "0.5.1"
 libloading = "0.8.5"
 env_logger = "0.11.6"
+libc = { workspace = true }
 
 [[bench]]
-name = "my_benchmark"
+name = "dlopen"
 harness = false
+required-features = ["mmap", "tls"]
+
+[[bench]]
+name = "dlsym"
+harness = false
+required-features = ["mmap", "tls"]
+
+[[bench]]
+name = "dl_iterate_phdr"
+harness = false
+required-features = ["mmap", "tls"]
 
 [[example]]
 name = "manaul"

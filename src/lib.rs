@@ -43,8 +43,6 @@ use alloc::{boxed::Box, string::{String, ToString}};
 use bitflags::bitflags;
 use core::{any::Any, fmt::Display};
 
-pub use dl_iterate_phdr::DlPhdrInfo;
-pub use dladdr::CDlinfo;
 pub use elf_loader::Symbol;
 #[cfg(feature = "std")]
 pub use init::init;

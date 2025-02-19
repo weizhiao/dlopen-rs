@@ -1,7 +1,5 @@
 use crate::{
-    dl_iterate_phdr::CallBack,
-    register::{global_find, register, DylibState, MANAGER},
-    DlPhdrInfo, OpenFlags, Result,
+    abi::CDlPhdrInfo, dl_iterate_phdr::CallBack, register::{global_find, register, DylibState, MANAGER}, OpenFlags, Result
 };
 use core::{
     ffi::{c_char, c_int, c_void, CStr},
@@ -169,7 +167,7 @@ fn init_argv() {
     }
 }
 
-unsafe extern "C" fn callback(info: *mut DlPhdrInfo, _size: usize, _data: *mut c_void) -> c_int {
+unsafe extern "C" fn callback(info: *mut CDlPhdrInfo, _size: usize, _data: *mut c_void) -> c_int {
     let info = unsafe { &*info };
     let base = info.dlpi_addr as usize;
     let phdrs = core::slice::from_raw_parts(info.dlpi_phdr, info.dlpi_phnum as usize);

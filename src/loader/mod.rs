@@ -272,7 +272,7 @@ impl ElfLibrary {
     }
 
     /// Gets the name of the dependent libraries
-    pub fn needed_libs(&self) -> &[&'static str] {
+    pub fn needed_libs(&self) -> &[&str] {
         self.dylib.needed_libs()
     }
 

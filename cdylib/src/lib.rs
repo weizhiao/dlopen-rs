@@ -1,4 +1,4 @@
-use dlopen_rs::{abi::dl_iterate_phdr as dl_iterate_phdr_impl, CDlinfo, DlPhdrInfo};
+use dlopen_rs::abi::{dl_iterate_phdr as dl_iterate_phdr_impl, CDlPhdrInfo, CDlinfo};
 use std::{
     ffi::{c_char, c_int, c_void},
     ptr::null,
@@ -28,11 +28,7 @@ unsafe extern "C" fn dlclose(handle: *const c_void) -> c_int {
 #[no_mangle]
 unsafe extern "C" fn dl_iterate_phdr(
     callback: Option<
-        unsafe extern "C" fn(
-            info: *mut DlPhdrInfo,
-            size: usize,
-            data: *mut c_void,
-        ) -> c_int,
+        unsafe extern "C" fn(info: *mut CDlPhdrInfo, size: usize, data: *mut c_void) -> c_int,
     >,
     data: *mut c_void,
 ) -> c_int {

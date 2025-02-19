@@ -1,11 +1,14 @@
 use crate::{register::MANAGER, ElfLibrary, Error, Result};
 use alloc::boxed::Box;
-use core::ffi::{c_char, c_int, c_ulonglong, c_void};
+use core::{
+    ffi::{c_char, c_int, c_ulonglong, c_void, CStr},
+    ptr::null_mut,
+};
 use elf_loader::arch::Phdr;
 
 /// same as dl_phdr_info in libc
 #[repr(C)]
-pub struct DlPhdrInfo {
+pub struct CDlPhdrInfo {
     pub dlpi_addr: usize,
     pub dlpi_name: *const c_char,
     pub dlpi_phdr: *const Phdr,
@@ -14,6 +17,42 @@ pub struct DlPhdrInfo {
     pub dlpi_subs: c_ulonglong,
     pub dlpi_tls_modid: usize,
     pub dlpi_tls_data: *mut c_void,
+}
+
+pub struct DlPhdrInfo<'lib> {
+    lib_base: usize,
+    lib_name: &'lib CStr,
+    phdrs: &'lib [Phdr],
+    dlpi_adds: c_ulonglong,
+    dlpi_subs: c_ulonglong,
+    tls_modid: usize,
+    tls_data: Option<&'lib [u8]>,
+}
+
+impl DlPhdrInfo<'_> {
+    /// Get the name of the dynamic library.
+    #[inline]
+    pub fn name(&self) -> &str {
+        self.lib_name.to_str().unwrap()
+    }
+
+    /// Get the C-style name of the dynamic library.
+    #[inline]
+    pub fn cname(&self) -> &CStr {
+        self.lib_name
+    }
+
+    /// Get the base address of the dynamic library.
+    #[inline]
+    pub fn base(&self) -> usize {
+        self.lib_base
+    }
+
+    /// Get the program headers of the dynamic library.
+    #[inline]
+    pub fn phdrs(&self) -> &[Phdr] {
+        self.phdrs
+    }
 }
 
 impl ElfLibrary {
@@ -29,14 +68,13 @@ impl ElfLibrary {
                 continue;
             }
             let info = DlPhdrInfo {
-                dlpi_addr: lib.relocated_dylib_ref().base() as _,
-                dlpi_name: lib.relocated_dylib_ref().cname().as_ptr(),
-                dlpi_phdr: phdrs.as_ptr().cast(),
-                dlpi_phnum: phdrs.len() as _,
+                lib_base: lib.relocated_dylib_ref().base(),
+                lib_name: lib.relocated_dylib_ref().cname(),
+                phdrs,
                 dlpi_adds: reader.all.len() as _,
                 dlpi_subs: 0,
-                dlpi_tls_modid: 0,
-                dlpi_tls_data: core::ptr::null_mut(),
+                tls_modid: 0,
+                tls_data: None,
             };
             callback(&info)?;
         }
@@ -45,18 +83,27 @@ impl ElfLibrary {
 }
 
 pub(crate) type CallBack =
-    unsafe extern "C" fn(info: *mut DlPhdrInfo, size: usize, data: *mut c_void) -> c_int;
+    unsafe extern "C" fn(info: *mut CDlPhdrInfo, size: usize, data: *mut c_void) -> c_int;
 
 // It is the same as `dl_iterate_phdr`.
 pub extern "C" fn dl_iterate_phdr(callback: Option<CallBack>, data: *mut c_void) -> c_int {
     let f = |info: &DlPhdrInfo| {
         if let Some(callback) = callback {
+            let mut c_info = CDlPhdrInfo {
+                dlpi_addr: info.lib_base,
+                dlpi_name: info.lib_name.as_ptr(),
+                dlpi_phdr: info.phdrs.as_ptr(),
+                dlpi_phnum: info.phdrs.len() as _,
+                dlpi_adds: info.dlpi_adds,
+                dlpi_subs: info.dlpi_subs,
+                dlpi_tls_modid: info.tls_modid,
+                dlpi_tls_data: info
+                    .tls_data
+                    .map(|data| data.as_ptr() as _)
+                    .unwrap_or(null_mut()),
+            };
             unsafe {
-                let ret = callback(
-                    info as *const DlPhdrInfo as _,
-                    size_of::<DlPhdrInfo>(),
-                    data,
-                );
+                let ret = callback(&mut c_info, size_of::<CDlPhdrInfo>(), data);
                 if ret != 0 {
                     return Err(Error::IteratorPhdrError { err: Box::new(ret) });
                 }

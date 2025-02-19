@@ -1,5 +1,5 @@
 use dlopen_rs::{ElfLibrary, OpenFlags};
-use std::{ffi::CStr, path::Path};
+use std::path::Path;
 
 fn main() {
     std::env::set_var("RUST_LOG", "trace");
@@ -34,10 +34,7 @@ fn main() {
     println!("{:?}", dl_info);
 
     ElfLibrary::dl_iterate_phdr(|info| {
-        println!(
-            "iterate dynamic library: {}",
-            unsafe { CStr::from_ptr(info.dlpi_name).to_str().unwrap() }
-        );
+        println!("iterate dynamic library: {}", info.name());
         Ok(())
     })
     .unwrap();

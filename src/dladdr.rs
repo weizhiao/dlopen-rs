@@ -30,8 +30,8 @@ impl DlInfo {
 
     /// Name of symbol whose definition overlaps addr
     #[inline]
-    pub fn symbol_name(&self) -> Option<&CStr> {
-        self.sname
+    pub fn symbol_name(&self) -> Option<&str> {
+        self.sname.map(|s| s.to_str().unwrap())
     }
 
     /// Exact address of symbol
@@ -108,7 +108,7 @@ pub unsafe extern "C" fn dladdr(addr: *const c_void, info: *mut CDlinfo) -> c_in
         info.dli_fbase = dl_info.dylib().base() as _;
         info.dli_fname = dl_info.dylib().cname().as_ptr();
         info.dli_saddr = dl_info.symbol_addr().unwrap_or(0) as _;
-        info.dli_sname = dl_info.symbol_name().map_or(null(), |s| s.as_ptr());
+        info.dli_sname = dl_info.sname.map_or(null(), |s| s.as_ptr());
         1
     } else {
         0
