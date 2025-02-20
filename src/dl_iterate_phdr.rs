@@ -4,14 +4,14 @@ use core::{
     ffi::{c_char, c_int, c_ulonglong, c_void, CStr},
     ptr::null_mut,
 };
-use elf_loader::arch::Phdr;
+use elf_loader::arch::ElfPhdr;
 
 /// same as dl_phdr_info in libc
 #[repr(C)]
 pub struct CDlPhdrInfo {
     pub dlpi_addr: usize,
     pub dlpi_name: *const c_char,
-    pub dlpi_phdr: *const Phdr,
+    pub dlpi_phdr: *const ElfPhdr,
     pub dlpi_phnum: u16,
     pub dlpi_adds: c_ulonglong,
     pub dlpi_subs: c_ulonglong,
@@ -22,7 +22,7 @@ pub struct CDlPhdrInfo {
 pub struct DlPhdrInfo<'lib> {
     lib_base: usize,
     lib_name: &'lib CStr,
-    phdrs: &'lib [Phdr],
+    phdrs: &'lib [ElfPhdr],
     dlpi_adds: c_ulonglong,
     dlpi_subs: c_ulonglong,
     tls_modid: usize,
@@ -50,7 +50,7 @@ impl DlPhdrInfo<'_> {
 
     /// Get the program headers of the dynamic library.
     #[inline]
-    pub fn phdrs(&self) -> &[Phdr] {
+    pub fn phdrs(&self) -> &[ElfPhdr] {
         self.phdrs
     }
 }

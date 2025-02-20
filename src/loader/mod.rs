@@ -10,15 +10,15 @@ use crate::{
     OpenFlags, Result,
 };
 use alloc::{boxed::Box, format, sync::Arc, vec::Vec};
-use core::{ffi::CStr, fmt::Debug};
+use core::{any::Any, ffi::CStr, fmt::Debug};
 use ehframe::EhFrame;
 use elf_loader::{
     abi::PT_GNU_EH_FRAME,
-    arch::{ElfRela, Phdr},
+    arch::{ElfPhdr, ElfRela, Phdr},
     mmap::MmapImpl,
     object::{ElfBinary, ElfObject},
     segment::ElfSegments,
-    CoreComponentRef, ElfDylib, Loader, RelocatedDylib, Symbol, UserData,
+    CoreComponent, CoreComponentRef, ElfDylib, Loader, RelocatedDylib, Symbol, UserData,
 };
 
 pub(crate) const EH_FRAME_ID: u8 = 0;
@@ -58,7 +58,7 @@ fn parse_phdr(
     phdr: &Phdr,
     segments: &ElfSegments,
     data: &mut UserData,
-) -> elf_loader::Result<()> {
+) -> core::result::Result<(), Box<dyn Any>> {
     match phdr.p_type {
         PT_GNU_EH_FRAME => {
             data.insert(
@@ -95,9 +95,9 @@ fn parse_phdr(
 #[allow(unused)]
 pub(crate) fn deal_unknown<'scope>(
     rela: &ElfRela,
-    lib: &ElfDylib,
+    lib: &CoreComponent,
     mut deps: impl Iterator<Item = &'scope RelocatedDylib<'static>> + Clone,
-) -> bool {
+) -> core::result::Result<(), Box<dyn Any>> {
     #[cfg(feature = "tls")]
     match rela.r_type() as _ {
         elf_loader::arch::REL_DTPMOD => {
@@ -113,10 +113,10 @@ pub(crate) fn deal_unknown<'scope>(
                     .module_id()
             };
             if r_sym != 0 {
-                let (dynsym, syminfo) = lib.symtab().symbol_idx(r_sym);
+                let (dynsym, syminfo) = lib.symtab().unwrap().symbol_idx(r_sym);
                 if dynsym.is_local() {
-                    unsafe { ptr.write(cast(lib.core_component_ref())) };
-                    return true;
+                    unsafe { ptr.write(cast(lib)) };
+                    return Ok(());
                 } else {
                     if let Some(id) = deps.find_map(|lib| unsafe {
                         lib.symtab()
@@ -124,18 +124,18 @@ pub(crate) fn deal_unknown<'scope>(
                             .map(|_| cast(lib.core_component_ref()))
                     }) {
                         unsafe { ptr.write(id) };
-                        return true;
+                        return Ok(());
                     };
                 };
             } else {
-                unsafe { ptr.write(cast(lib.core_component_ref())) };
-                return true;
+                unsafe { ptr.write(cast(lib)) };
+                return Ok(());
             }
         }
         _ => {}
     }
     log::error!("Relocating dylib [{}] failed!", lib.name());
-    false
+    Err(Box::new(()))
 }
 
 #[inline]
@@ -162,7 +162,6 @@ pub(crate) fn create_lazy_scope(
 }
 
 fn from_impl(object: impl ElfObject, flags: OpenFlags) -> Result<ElfLibrary> {
-    #[allow(unused_mut)]
     let mut loader = Loader::<MmapImpl>::new();
     #[cfg(feature = "std")]
     unsafe {
@@ -425,7 +424,7 @@ impl Dylib {
 
     /// Get the program headers of the dynamic library.
     #[inline]
-    pub fn phdrs(&self) -> &[Phdr] {
+    pub fn phdrs(&self) -> &[ElfPhdr] {
         self.inner.phdrs()
     }
 

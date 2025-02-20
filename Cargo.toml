@@ -54,7 +54,7 @@ default-features = false
 features = ['macros']
 
 [dependencies.elf_loader]
-version = "0.8.0"
+version = "0.9.0"
 default-features = false
 
 [dependencies.dynamic-loader-cache]

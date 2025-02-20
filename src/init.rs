@@ -1,5 +1,8 @@
 use crate::{
-    abi::CDlPhdrInfo, dl_iterate_phdr::CallBack, register::{global_find, register, DylibState, MANAGER}, OpenFlags, Result
+    abi::CDlPhdrInfo,
+    dl_iterate_phdr::CallBack,
+    register::{global_find, register, DylibState, MANAGER},
+    OpenFlags, Result,
 };
 use core::{
     ffi::{c_char, c_int, c_void, CStr},
@@ -7,7 +10,7 @@ use core::{
 };
 use elf_loader::{
     abi::{PT_DYNAMIC, PT_LOAD},
-    arch::{Dyn, Phdr},
+    arch::{Dyn, ElfPhdr},
     dynamic::ElfRawDynamic,
     segment::{ElfSegments, MASK, PAGE_SIZE},
     set_global_scope, RelocatedDylib, Symbol, UserData,
@@ -67,7 +70,7 @@ pub(crate) unsafe fn from_raw(
     name: CString,
     base: usize,
     dynamic_ptr: *const Dyn,
-    phdrs: Option<&'static [Phdr]>,
+    phdrs: Option<&'static [ElfPhdr]>,
 ) -> Result<Option<RelocatedDylib<'static>>> {
     let dynamic = ElfRawDynamic::new(dynamic_ptr)?;
     let offset = if dynamic.hash_off > base { 0 } else { base };
