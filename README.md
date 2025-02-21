@@ -7,15 +7,27 @@ English | [中文](README-zh_cn.md)
 
 [[Documentation]](https://docs.rs/dlopen-rs/)
 
-A Rust library that implements a series of interfaces such as `dlopen` and `dlsym`, consistent with the behavior of libc, providing robust support for dynamic library loading and symbol resolution.
+`dlopen-rs` is a dynamic linker fully implemented in Rust, providing a set of Rust-friendly interfaces for manipulating dynamic libraries, as well as C-compatible interfaces consistent with `libc` behavior.
 
-This library serves four purposes:
-1. Provides a dynamic linker written purely in `Rust`.
-2. Provide loading ELF dynamic libraries support for `#![no_std]` targets.
-3. Easily swap out symbols in shared libraries with your own custom symbols at runtime
-4. Faster than `ld.so` in most cases (loading dynamic libraries and getting symbols)
+## Usage
+You can use `dlopen-rs` as a replacement for `libloading` to load dynamic libraries. It also allows replacing libc's `dlopen`, `dlsym`, `dl_iterate_phdr` and other functions with implementations from `dlopen-rs` using `LD_PRELOAD` without code modifications.
+```shell
+# Compile the library as a dynamic library
+$ cargo build -r -p cdylib
+# Compile test cases
+$ cargo build -r -p dlopen-rs --example preload
+# Replace libc implementations with ours
+$ RUST_LOG=trace LD_PRELOAD=./target/release/libdlopen.so ./target/release/examples/preload
+```
 
 Currently, it supports `x86_64`, `RV64`, and `AArch64` architectures.
+
+## Advantages
+1. Provides support for loading ELF dynamic libraries to #![no_std] targets.
+2. Enables easy runtime replacement of symbols in shared libraries with custom implementations.
+3. Typically faster than `ld.so` for dynamic library loading and symbol resolution.
+4. Offers Rust-friendly interfaces with ergonomic design.
+5. Allows repeated loading of the same dynamic library into memory. Using the `CUSTOM_NOT_REGISTER` flag in OpenFlags enables multiple coexisting copies of a library (identical or modified) in memory, facilitating runtime dynamic library `hot-swapping`.
 
 ## Feature
 | Feature   | Default | Description                                                                                                                                           |
@@ -32,7 +44,7 @@ Currently, it supports `x86_64`, `RV64`, and `AArch64` architectures.
 ## Examples
 
 ### Example 1
-The `dlopen` interface is used to load dynamic libraries. The `dlopen` in `dlopen-rs` behaves consistently with the `dlopen` in `libc`. Additionally, this library uses the `log` crate, and you can use your preferred logging library to output logs to observe the working process of `dlopen-rs`. In the examples of this library, the `env_logger` crate is used for logging.
+The `dlopen` interface is used to load dynamic libraries, and the `dl_iterate_phdr` interface is used to iterate through the already loaded dynamic libraries. Additionally, this library uses the `log` crate, and you can use your preferred library to output log information to view the workflow of `dlopen-rs`. In the examples of this library, the `env_logger` crate is used.
 ```rust
 use dlopen_rs::ELFLibrary;
 use std::path::Path;
@@ -65,19 +77,6 @@ fn main() {
 ```
 
 ### Example 2
-Use `LD_PRELOAD` to replace the dlopen and other functions in libc with the implementations provided by this library.
-```shell
-# Compile the library into a dynamic library format
-cargo build -r -p cdylib
-
-# Compile the test case
-cargo build -r -p dlopen-rs --example preload
-
-# Use the implementation from this library to replace the implementation in libc
-RUST_LOG=trace LD_PRELOAD=./target/release/libdlopen.so ./target/release/examples/preload
-```
-
-### Example 3
 Fine-grained control of the load flow of the dynamic library, you can replace certain functions in the dynamic library that need to be relocated with your own implementation. In the following example, we replace `malloc` with `mymalloc` in the dynamic library and turn on lazy binding.
 ```rust
 use dlopen_rs::ELFLibrary;

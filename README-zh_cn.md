@@ -5,13 +5,26 @@
 
 [文档](https://docs.rs/dlopen-rs/)
 
-一个 `Rust` 库，实现了与libc行为一致的`dlopen`，`dlsym`等一系列接口，为动态库加载和符号解析提供了支持。
+`dlopen-rs`是一个完全使用Rust实现的动态链接器，提供了一组对Rust友好的操作动态库的接口，也提供了一组与libc中行为一致的C接口。
 
-这个库有四个目的：
-1. 提供一个纯`Rust`编写的动态链接器。
-2. 为 #![no_std] 目标提供加载 `ELF` 动态库的支持。
-3. 能够轻松地在运行时用自己的自定义符号替换共享库中的符号。
-4. 大多数情况下有比`ld.so`更快的速度（加载动态库和获取符号）
+## 用法
+你可以使用`dlopen-rs`替换`libloading`来加载动态库，也可以在不修改任何代码的情况下，利用`LD_PRELOAD`将libc中的`dlopen`，`dlsym`，`dl_iterate_phdr`等函数替换为`dlopen-rs`中的实现。
+
+```shell
+# 将本库编译成动态库形式
+cargo build -r -p cdylib
+# 编译测试用例
+cargo build -r -p dlopen-rs --example preload
+# 使用本库中的实现替换libc中的实现
+RUST_LOG=trace LD_PRELOAD=./target/release/libdlopen.so ./target/release/examples/preload
+```
+
+## 优势
+1. 能够为 #![no_std] 目标提供加载 `ELF` 动态库的支持。
+2. 能够轻松地在运行时用自己的自定义符号替换共享库中的符号。
+3. 大多数情况下有比`ld.so`更快的速度。（加载动态库和获取符号）
+4. 提供了对Rust友好的接口。
+5. 允许重复加载某个动态库到内存中。你可以使用OpenFlags中的`CUSTOM_NOT_REGISTER`标识来做到这一点，使用该功能时，程序的内存空间中可以同时存在一个动态库的多个副本（这些副本可能完全相同，也可能有所差异），你可以利用该功能在运行时动态更新动态库。
 
 ## 特性
 
@@ -28,7 +41,7 @@
 ## 示例
 
 ### 示例1
-使用`dlopen`接口加载动态库，`dlopen-rs`中的`dlopen`与`libc`中的`dlopen`行为一致。此外本库使用了`log`库，你可以使用自己喜欢的库输出log，来查看dlopen-rs的工作流程，本库的例子中使用的是`env_logger`库。
+使用`dlopen`接口加载动态库，使用`dl_iterate_phdr`接口遍历已经加载的动态库。此外本库使用了`log`库，你可以使用自己喜欢的库输出日志信息，来查看dlopen-rs的工作流程，本库的例子中使用的是`env_logger`库。
 ```rust
 use dlopen_rs::{ElfLibrary, OpenFlags};
 use std::path::Path;
@@ -59,18 +72,8 @@ fn main() {
     .unwrap();
 }
 ```
-### 示例2
-利用`LD_PRELOAD`将libc中dlopen等函数替换为本库中的实现。
-```shell
-# 将本库编译成动态库形式
-cargo build -r -p cdylib
-# 编译测试用例
-cargo build -r -p dlopen-rs --example preload
-# 使用本库中的实现替换libc中的实现
-RUST_LOG=trace LD_PRELOAD=./target/release/libdlopen.so ./target/release/examples/preload
-```
 
-### 示例3
+### 示例2
 细粒度地控制动态库的加载流程,可以将动态库中需要重定位的某些函数换成自己实现的函数。下面这个例子中就是把动态库中的`malloc`替换为了`mymalloc`。
 ```rust
 use dlopen_rs::{ElfLibrary, OpenFlags};
