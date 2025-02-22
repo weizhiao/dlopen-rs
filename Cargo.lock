@@ -784,7 +784,8 @@ dependencies = [
 [[package]]
 name = "thread-register"
 version = "0.1.0"
-source = "git+https://github.com/weizhiao/thread-register#327a490d28dd5345fdd3af6b548abdb168ccc973"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7c356fc97c074d771e10131b59f3c77e0c4e4e52acf4bb2cd91dfe655ee8a90"
 
 [[package]]
 name = "tinytemplate"
