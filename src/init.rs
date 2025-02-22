@@ -149,6 +149,24 @@ fn iterate_phdr(start: *const LinkMap, mut f: impl FnMut(Symbol<IterPhdr>)) {
         {
             if lib.name().contains("libc.so") {
                 f(unsafe { lib.get::<IterPhdr>("dl_iterate_phdr").unwrap() });
+                #[cfg(feature = "tls")]
+                {
+                    let dlopen = unsafe {
+                        lib.get::<extern "C" fn (filename: *const c_char, flags: c_int) -> *const c_void >("dlopen")
+							.unwrap()
+                    };
+                    let libc_handle = dlopen(lib.cname().as_ptr(), 0);
+                    let dlsym = unsafe {
+                        lib.get::<extern "C" fn(*const c_void, *const c_char) -> *const c_void>(
+                            "dlsym",
+                        )
+                        .unwrap()
+                    };
+                    crate::loader::tls::init_tls(
+                        dlsym(libc_handle, c"__resp".as_ptr()) as _,
+                        dlsym(libc_handle, c"__h_errno".as_ptr()) as _,
+                    );
+                }
                 return;
             }
         };

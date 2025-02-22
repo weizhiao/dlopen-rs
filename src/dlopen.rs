@@ -12,11 +12,11 @@ impl ElfLibrary {
     ///
     /// # Example
     /// ```no_run
-    /// use std::path::Path;
-    /// use dlopen_rs::ELFLibrary;
+    /// # use std::path::Path;
+    /// # use dlopen_rs::{ElfLibrary, OpenFlags};
     ///
     /// let path = Path::new("/path/to/library.so");
-    /// let lib = ELFLibrary::dlopen(path, OpenFlags::RTLD_LOCAL).expect("Failed to load library");
+    /// let lib = ElfLibrary::dlopen(path, OpenFlags::RTLD_LOCAL).expect("Failed to load library");
     /// ```
     #[cfg(feature = "std")]
     #[inline]
@@ -190,15 +190,19 @@ fn dlopen_impl(path: &str, flags: OpenFlags, f: impl Fn() -> Result<ElfLibrary>)
     // 保存new_libs的索引
     let mut stack = Vec::new();
     stack.push(Item { idx: 0, next: 0 });
+    // 记录新加载的动态库进行重定位的顺序
+    let mut order = Vec::new();
 
     'start: while let Some(mut item) = stack.pop() {
         let names = new_libs[item.idx].as_ref().unwrap().needed_libs();
         for name in names.iter().skip(item.next) {
             let lib = lock.all.get_mut(*name).unwrap();
             lib.state.set_unused();
+            // 判断当前依赖库是否是新加载的，如果不是则跳过本轮操作，因为它已经被重定位过了
             let Some(idx) = lib.state.get_new_idx() else {
                 continue;
             };
+            // 将当前依赖库的状态设置为已经重定位
             lib.state.set_relocated();
             item.next += 1;
             stack.push(item);
@@ -208,20 +212,23 @@ fn dlopen_impl(path: &str, flags: OpenFlags, f: impl Fn() -> Result<ElfLibrary>)
             });
             continue 'start;
         }
-        let iter = lock.global.values().chain(dep_libs.iter());
-        let reloc = |lib: ElfLibrary| {
-            log::debug!("Relocating dylib [{}]", lib.name());
-            let lazy_scope = create_lazy_scope(&dep_libs, lib.dylib.is_lazy());
-            lib.dylib.relocate(
-                iter,
-                &|name| builtin::BUILTIN.get(name).copied(),
-                deal_unknown,
-                lazy_scope,
-            )
-        };
-        reloc(core::mem::take(&mut new_libs[item.idx]).unwrap())?;
+        order.push(item.idx);
     }
 
+    let read_lock = lock.downgrade();
+    for idx in order {
+        let lib = core::mem::take(&mut new_libs[idx]).unwrap();
+        let lazy_scope = create_lazy_scope(&dep_libs, lib.dylib.is_lazy());
+        log::debug!("Relocating dylib [{}]", lib.name());
+        let iter = read_lock.global.values().chain(dep_libs.iter());
+        lib.dylib.relocate(
+            iter,
+            &|name| builtin::BUILTIN.get(name).copied(),
+            deal_unknown,
+            lazy_scope,
+        )?;
+    }
+	drop(read_lock);
     let deps = Arc::new(dep_libs.into_boxed_slice());
     if !flags.contains(OpenFlags::CUSTOM_NOT_REGISTER) {
         recycler.is_recycler = false;
@@ -238,7 +245,7 @@ fn dlopen_impl(path: &str, flags: OpenFlags, f: impl Fn() -> Result<ElfLibrary>)
         core,
         flags,
         Some(deps),
-        &mut lock,
+        &mut MANAGER.write(),
         *DylibState::default().set_relocated(),
     );
     Ok(res)

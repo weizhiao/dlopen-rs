@@ -11,7 +11,7 @@
 //!
 //! # Examples
 //! ```
-//! use dlopen_rs::ElfLibrary;
+//! # use dlopen_rs::{ElfLibrary, OpenFlags};
 //! use std::path::Path;
 //!
 //! fn main(){
@@ -32,14 +32,17 @@ pub mod abi;
 #[cfg(feature = "debug")]
 mod debug;
 mod dl_iterate_phdr;
-mod dlsym;
 mod dladdr;
 mod dlopen;
+mod dlsym;
 #[cfg(feature = "std")]
 mod init;
 mod loader;
 mod register;
-use alloc::{boxed::Box, string::{String, ToString}};
+use alloc::{
+    boxed::Box,
+    string::{String, ToString},
+};
 use bitflags::bitflags;
 use core::{any::Any, fmt::Display};
 

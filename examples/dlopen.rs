@@ -1,4 +1,5 @@
 use dlopen_rs::{ElfLibrary, OpenFlags};
+use libloading::Library;
 use std::path::Path;
 
 fn main() {
@@ -32,6 +33,15 @@ fn main() {
 
     let dl_info = ElfLibrary::dladdr(backtrace.into_raw() as usize).unwrap();
     println!("{:?}", dl_info);
+
+    let lib = unsafe { Library::new("/lib/x86_64-linux-gnu/libc.so.6").unwrap() };
+    let val = unsafe { lib.get::<*mut usize>(b"errno").unwrap() };
+    println!("{:?}", val);
+
+    ElfLibrary::dlopen(
+        "/usr/lib/x86_64-linux-gnu/libcurl-gnutls.so",
+        OpenFlags::RTLD_LAZY,
+    ).unwrap();
 
     ElfLibrary::dl_iterate_phdr(|info| {
         println!("iterate dynamic library: {}", info.name());

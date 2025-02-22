@@ -1,5 +1,6 @@
 pub(crate) mod builtin;
 pub(crate) mod ehframe;
+#[cfg(feature = "tls")]
 pub(crate) mod tls;
 
 #[cfg(feature = "debug")]
@@ -132,6 +133,18 @@ pub(crate) fn deal_unknown<'scope>(
                 return Ok(());
             }
         }
+        elf_loader::arch::REL_TPOFF => {
+            let r_sym = rela.r_symbol();
+            let r_off = rela.r_offset();
+            if r_sym != 0 {
+                let (dynsym, syminfo) = lib.symtab().unwrap().symbol_idx(r_sym);
+                if let Some(val) = tls::get_libc_tls_offset(syminfo.name()) {
+                    let ptr = (lib.base() + r_off) as *mut usize;
+                    unsafe { ptr.write(val) };
+                    return Ok(());
+                }
+            }
+        }
         _ => {}
     }
     log::error!("Relocating dylib [{}] failed!", lib.name());
@@ -150,9 +163,15 @@ pub(crate) fn create_lazy_scope(
             .collect();
         Some(Box::new(move |name: &str| {
             deps_weak.iter().find_map(|dep| unsafe {
-                RelocatedDylib::from_core_component(dep.upgrade().unwrap())
-                    .get::<()>(name)
-                    .map(|sym| sym.into_raw())
+                let lib = RelocatedDylib::from_core_component(dep.upgrade().unwrap());
+                lib.get::<()>(name).map(|sym| {
+                    log::trace!(
+                        "Lazy Binding: find symbol [{}] from [{}] in local scope ",
+                        name,
+                        lib.name()
+                    );
+                    sym.into_raw()
+                })
             })
         })
             as Box<dyn Fn(&str) -> Option<*const ()> + 'static>)
@@ -200,7 +219,7 @@ impl ElfLibrary {
     ///
     /// # Examples
     /// ```no_run
-    /// # use ::dlopen_rs::ElfLibrary;
+    /// # use dlopen_rs::{ElfLibrary, OpenFlags};
     /// let lib = ElfLibrary::from_file("/path/to/awesome.module", OpenFlags::RTLD_LOCAL)
     ///		.unwrap();
     /// ```
@@ -216,7 +235,9 @@ impl ElfLibrary {
     /// Creates a new `ElfLibrary` instance from an open file handle.
     /// The `flags` argument can control how dynamic libraries are loaded.
     /// # Examples
-    /// ```
+    /// ```no_run
+	/// # use std::fs::File;
+    /// # use dlopen_rs::{ElfLibrary ,OpenFlags};
     /// let file = File::open("/path/to/awesome.module").unwrap();
     /// let lib = ElfLibrary::from_open_file(file, "/path/to/awesome.module", OpenFlags::RTLD_LOCAL).unwrap();
     /// ```
@@ -239,10 +260,11 @@ impl ElfLibrary {
     /// # Examples
     ///
     /// ```no_run
-    /// # use ::dlopen_rs::ElfLibrary;
+    /// # use ::dlopen_rs::{ElfLibrary, OpenFlags};
+	/// # use std::path::Path;
     /// let path = Path::new("/path/to/awesome.module");
     /// let bytes = std::fs::read(path).unwrap();
-    /// let lib = ElfLibrary::from_binary(&bytes, "/path/to/awesome.module", OpenFlags::RTLD_LOCAL).unwarp();
+    /// let lib = ElfLibrary::from_binary(&bytes, "/path/to/awesome.module", OpenFlags::RTLD_LOCAL).unwrap();
     /// ```
     #[inline]
     pub fn from_binary(
@@ -322,7 +344,7 @@ impl ElfLibrary {
     /// Use libraries to relocate the current library.
     /// # Examples
     /// ```no_run
-    /// # use ::dlopen_rs::ElfLibrary;
+    /// # use ::dlopen_rs::{ElfLibrary, OpenFlags};
     /// let libc = ElfLibrary::load_existing("libc").unwrap();
     /// let libgcc = ElfLibrary::load_existing("libgcc").unwrap();
     /// let lib = ElfLibrary::from_file("/path/to/awesome.module", OpenFlags::RTLD_LOCAL)
@@ -338,7 +360,9 @@ impl ElfLibrary {
     /// # Examples
     ///
     /// ```no_run
-    /// # use ::dlopen_rs::ElfLibrary;
+    /// # use ::dlopen_rs::{ElfLibrary, OpenFlags};
+	/// # use core::ffi::c_void;
+	/// # use libc::size_t;
     /// extern "C" fn mymalloc(size: size_t) -> *mut c_void {
     ///     println!("malloc:{}bytes", size);
     ///     unsafe { libc::malloc(size) }
@@ -347,7 +371,7 @@ impl ElfLibrary {
     /// let libgcc = ElfLibrary::load_existing("libgcc").unwrap();
     /// let lib = ElfLibrary::from_file("/path/to/awesome.module", OpenFlags::RTLD_LOCAL)
     /// 	.unwrap()
-    /// 	.relocate_with(&[libc, libgcc], &|name| {
+    /// 	.relocate_with(&[libc, libgcc], |name| {
     ///         if name == "malloc" {
     ///	             return Some(mymalloc as _);
     ///         } else {
@@ -444,6 +468,8 @@ impl Dylib {
     ///
     /// # Examples
     /// ```no_run
+    /// # use dlopen_rs::{Symbol, ElfLibrary ,OpenFlags};
+    /// # let lib = ElfLibrary::dlopen("awesome.so", OpenFlags::RTLD_NOW).unwrap();
     /// unsafe {
     ///     let awesome_function: Symbol<unsafe extern fn(f64) -> f64> =
     ///         lib.get("awesome_function").unwrap();
@@ -452,6 +478,8 @@ impl Dylib {
     /// ```
     /// A static variable may also be loaded and inspected:
     /// ```no_run
+    /// # use dlopen_rs::{Symbol, ElfLibrary ,OpenFlags};
+    /// # let lib = ElfLibrary::dlopen("awesome.so", OpenFlags::RTLD_NOW).unwrap();
     /// unsafe {
     ///     let awesome_variable: Symbol<*mut f64> = lib.get("awesome_variable").unwrap();
     ///     **awesome_variable = 42.0;

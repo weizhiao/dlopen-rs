@@ -191,13 +191,23 @@ pub(crate) fn register(
 
 #[cfg(feature = "std")]
 pub(crate) fn global_find(name: &str) -> Option<*const ()> {
-    log::debug!("Lazy Binding [{}]", name);
+    log::debug!("Lazy Binding: [{}]", name);
     crate::loader::builtin::BUILTIN
         .get(name)
         .copied()
-        .or(MANAGER
-            .read()
-            .global
-            .values()
-            .find_map(|lib| unsafe { lib.get::<()>(name).map(|sym| sym.into_raw()) }))
+        .or_else(|| {
+            MANAGER.read().global.values().find_map(|lib| unsafe {
+                lib.get::<()>(name).map(|sym| {
+                    log::trace!(
+                        "Lazy Binding: find symbol [{}] from [{}] in global scope ",
+                        name,
+                        lib.name()
+                    );
+                    let val = sym.into_raw();
+                    assert!(lib.base() != val as usize);
+                    //println!("{:x} {:x}", lib.base(), val as usize);
+                    val
+                })
+            })
+        })
 }

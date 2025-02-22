@@ -9,7 +9,7 @@ keywords = ["dlopen", "elf", "unix", "loader"]
 categories = ["no-std", "os", "embedded"]
 license = "Apache-2.0"
 description = "A safe and efficient Rust implementation of dynamic library loading."
-exclude = [".gitignore", "/test", "/example-dylib", "check.sh"]
+exclude = [".gitignore", "/example-dylib", "check.sh"]
 
 [workspace]
 members = ["example-dylib", "cdylib"]
@@ -54,11 +54,17 @@ default-features = false
 features = ['macros']
 
 [dependencies.elf_loader]
-version = "0.9.0"
+version = "0.9.1"
 default-features = false
+features = ["use-libc", "log"]
 
 [dependencies.dynamic-loader-cache]
 version = "0.2.1"
+optional = true
+
+[dependencies.thread-register]
+git = "https://github.com/weizhiao/thread-register"
+version = "0.1.0"
 optional = true
 
 [dependencies]
@@ -75,7 +81,7 @@ std = ["elf_loader/fs", "dep:dynamic-loader-cache"]
 # enable default implementation on devices with mmapl storage
 mmap = ["std", "elf_loader/mmap"]
 # enable this when you need to use thread loca
-tls = ["std", "dep:libc"]
+tls = ["std", "dep:libc", "dep:thread-register"]
 # activate specific versions of symbols for dynamic library loading
 version = ["elf_loader/version"]
 # enable this when you want to use the exception handling mechanism provided by dlopen-rs
@@ -99,6 +105,11 @@ libc = { workspace = true }
 
 [[bench]]
 name = "dlopen"
+harness = false
+required-features = ["mmap", "tls"]
+
+[[bench]]
+name = "dlopen_llvm"
 harness = false
 required-features = ["mmap", "tls"]
 
