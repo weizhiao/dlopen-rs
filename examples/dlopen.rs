@@ -38,11 +38,6 @@ fn main() {
     let val = unsafe { lib.get::<*mut usize>(b"errno").unwrap() };
     println!("{:?}", val);
 
-    ElfLibrary::dlopen(
-        "/usr/lib/x86_64-linux-gnu/libcurl-gnutls.so",
-        OpenFlags::RTLD_LAZY,
-    ).unwrap();
-
     ElfLibrary::dl_iterate_phdr(|info| {
         println!("iterate dynamic library: {}", info.name());
         Ok(())

@@ -8,7 +8,7 @@ repository = "https://github.com/weizhiao/dlopen-rs"
 keywords = ["dlopen", "elf", "unix", "loader"]
 categories = ["no-std", "os", "embedded"]
 license = "Apache-2.0"
-description = "A safe and efficient Rust implementation of dynamic library loading."
+description = "A dynamic linker fully implemented in Rust."
 exclude = [".gitignore", "/example-dylib", "check.sh"]
 
 [workspace]
@@ -54,7 +54,7 @@ default-features = false
 features = ['macros']
 
 [dependencies.elf_loader]
-version = "0.9.1"
+version = "0.9.2"
 default-features = false
 features = ["use-libc", "log"]
 

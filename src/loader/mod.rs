@@ -15,7 +15,7 @@ use core::{any::Any, ffi::CStr, fmt::Debug};
 use ehframe::EhFrame;
 use elf_loader::{
     abi::PT_GNU_EH_FRAME,
-    arch::{ElfPhdr, ElfRela, Phdr},
+    arch::{ElfPhdr, ElfRela},
     mmap::MmapImpl,
     object::{ElfBinary, ElfObject},
     segment::ElfSegments,
@@ -56,7 +56,7 @@ impl Debug for ElfLibrary {
 #[allow(unused)]
 fn parse_phdr(
     cname: &CStr,
-    phdr: &Phdr,
+    phdr: &ElfPhdr,
     segments: &ElfSegments,
     data: &mut UserData,
 ) -> core::result::Result<(), Box<dyn Any>> {
@@ -236,7 +236,7 @@ impl ElfLibrary {
     /// The `flags` argument can control how dynamic libraries are loaded.
     /// # Examples
     /// ```no_run
-	/// # use std::fs::File;
+    /// # use std::fs::File;
     /// # use dlopen_rs::{ElfLibrary ,OpenFlags};
     /// let file = File::open("/path/to/awesome.module").unwrap();
     /// let lib = ElfLibrary::from_open_file(file, "/path/to/awesome.module", OpenFlags::RTLD_LOCAL).unwrap();
@@ -261,7 +261,7 @@ impl ElfLibrary {
     ///
     /// ```no_run
     /// # use ::dlopen_rs::{ElfLibrary, OpenFlags};
-	/// # use std::path::Path;
+    /// # use std::path::Path;
     /// let path = Path::new("/path/to/awesome.module");
     /// let bytes = std::fs::read(path).unwrap();
     /// let lib = ElfLibrary::from_binary(&bytes, "/path/to/awesome.module", OpenFlags::RTLD_LOCAL).unwrap();
@@ -361,8 +361,8 @@ impl ElfLibrary {
     ///
     /// ```no_run
     /// # use ::dlopen_rs::{ElfLibrary, OpenFlags};
-	/// # use core::ffi::c_void;
-	/// # use libc::size_t;
+    /// # use core::ffi::c_void;
+    /// # use libc::size_t;
     /// extern "C" fn mymalloc(size: size_t) -> *mut c_void {
     ///     println!("malloc:{}bytes", size);
     ///     unsafe { libc::malloc(size) }

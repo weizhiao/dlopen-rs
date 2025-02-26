@@ -1,4 +1,4 @@
-use elf_loader::arch::{Phdr, TLS_DTV_OFFSET};
+use elf_loader::arch::{ElfPhdr, TLS_DTV_OFFSET};
 use libc::{
     __errno_location, pthread_getspecific, pthread_key_create, pthread_key_delete, pthread_key_t,
     pthread_setspecific,
@@ -31,7 +31,7 @@ pub(crate) struct ElfTls {
 const MAX_TLS_INDEX: usize = 4096;
 
 impl ElfTls {
-    pub(crate) fn new(phdr: &Phdr, base: usize) -> Self {
+    pub(crate) fn new(phdr: &ElfPhdr, base: usize) -> Self {
         unsafe extern "C" fn dtor(ptr: *mut c_void) {
             if !ptr.is_null() {
                 let layout = ptr.cast::<Layout>().read();

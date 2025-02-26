@@ -4,7 +4,7 @@ use core::{ffi::c_void, ops::Range};
 pub(crate) struct EhFrame(usize);
 
 impl EhFrame {
-    pub(crate) fn new(phdr: &elf_loader::arch::Phdr, map_range: Range<usize>) -> Option<Self> {
+    pub(crate) fn new(phdr: &elf_loader::arch::ElfPhdr, map_range: Range<usize>) -> Option<Self> {
         let base = map_range.start;
         let eh_frame_hdr_off = phdr.p_vaddr as usize;
         let eh_frame_hdr_size = phdr.p_memsz as usize;

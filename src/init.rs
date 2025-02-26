@@ -6,12 +6,13 @@ use crate::{
 };
 use core::{
     ffi::{c_char, c_int, c_void, CStr},
+    num::NonZero,
     ptr::{addr_of, addr_of_mut, null_mut, NonNull},
 };
 use elf_loader::{
     abi::{PT_DYNAMIC, PT_LOAD},
     arch::{Dyn, ElfPhdr},
-    dynamic::ElfRawDynamic,
+    dynamic::ElfDynamic,
     segment::{ElfSegments, MASK, PAGE_SIZE},
     set_global_scope, RelocatedDylib, Symbol, UserData,
 };
@@ -66,39 +67,62 @@ extern "C" {
     static environ: usize;
 }
 
-pub(crate) unsafe fn from_raw(
-    name: CString,
-    base: usize,
-    dynamic_ptr: *const Dyn,
-    phdrs: Option<&'static [ElfPhdr]>,
-) -> Result<Option<RelocatedDylib<'static>>> {
-    let dynamic = ElfRawDynamic::new(dynamic_ptr)?;
-    let offset = if dynamic.hash_off > base { 0 } else { base };
-    #[allow(unused_mut)]
-    let mut dynamic = dynamic.finish(offset);
-    #[cfg(feature = "version")]
-    {
-        dynamic.verneed = dynamic
-            .verneed
-            .map(|(off, num)| (off.checked_add(base - offset).unwrap_unchecked(), num));
-        dynamic.verdef = dynamic
-            .verdef
-            .map(|(off, num)| (off.checked_add(base - offset).unwrap_unchecked(), num));
-    }
-    #[allow(unused_mut)]
-    let mut user_data = UserData::empty();
-    unsafe fn drop_handle(_handle: NonNull<c_void>, _len: usize) -> elf_loader::Result<()> {
-        Ok(())
-    }
+fn create_segments(base: usize, len: usize) -> Option<ElfSegments> {
     let memory = if let Some(memory) = NonNull::new(base as _) {
         memory
     } else {
         // 如果程序本身不是Shared object file,那么它的这个字段为0,此时无法使用程序本身的符号进行重定位
         log::warn!(
             "Failed to initialize an existing library: [{:?}], Because it's not a Shared object file",
-            (*addr_of!(PROGRAM_NAME)).as_ref().unwrap()
+            unsafe{(*addr_of!(PROGRAM_NAME)).as_ref().unwrap()}
         );
-        return Ok(None);
+        return None;
+    };
+    unsafe fn drop_handle(_handle: NonNull<c_void>, _len: usize) -> elf_loader::Result<()> {
+        Ok(())
+    }
+    Some(ElfSegments::new(memory, len, drop_handle))
+}
+
+pub(crate) unsafe fn from_raw(
+    name: CString,
+    segments: ElfSegments,
+    dynamic_ptr: *const Dyn,
+    phdrs: Option<&'static [ElfPhdr]>,
+) -> Result<Option<RelocatedDylib<'static>>> {
+    #[allow(unused_mut)]
+    let mut dynamic = ElfDynamic::new(dynamic_ptr, &segments)?;
+
+    #[cfg(target_env = "gnu")]
+    {
+        // 因为glibc会修改dynamic段中的信息，所以这里需要手动恢复一下
+        if !name.to_str().unwrap().contains("linux-vdso.so.1") {
+            let base = segments.base();
+            dynamic.strtab -= base;
+            dynamic.symtab -= base;
+            dynamic.hashtab -= base;
+            println!("{:?}", name);
+            println!("{:#x}", dynamic.strtab);
+            dynamic.version_idx = dynamic
+                .version_idx
+                .map(|v| NonZero::new(v.get() - base).unwrap());
+        }
+    }
+    #[allow(unused_mut)]
+    let mut user_data = UserData::empty();
+    #[cfg(feature = "debug")]
+    unsafe {
+        if phdrs.is_some() {
+            use super::debug::*;
+            user_data.insert(
+                crate::loader::DEBUG_INFO_ID,
+                Box::new(DebugInfo::new(
+                    segments.base(),
+                    name.as_ptr(),
+                    dynamic_ptr as usize,
+                )),
+            );
+        }
     };
     let len = if let Some(phdrs) = phdrs {
         let mut min_vaddr = usize::MAX;
@@ -112,25 +136,15 @@ pub(crate) unsafe fn from_raw(
         });
         max_vaddr - min_vaddr
     } else {
-        0
+        usize::MAX
     };
-    let segments = ElfSegments::new(memory, len, drop_handle);
-    #[cfg(feature = "debug")]
-    unsafe {
-        if phdrs.is_some() {
-            use super::debug::*;
-            user_data.insert(
-                crate::loader::DEBUG_INFO_ID,
-                Box::new(DebugInfo::new(offset, name.as_ptr(), dynamic_ptr as usize)),
-            );
-        }
-    };
+    let new_segments = create_segments(segments.base(), len).unwrap();
     let lib = RelocatedDylib::new_uncheck(
         name,
-        base,
+        new_segments.base(),
         dynamic,
         phdrs.unwrap_or(&[]),
-        segments,
+        new_segments,
         user_data,
     );
     Ok(Some(lib))
@@ -144,9 +158,11 @@ fn iterate_phdr(start: *const LinkMap, mut f: impl FnMut(Symbol<IterPhdr>)) {
     while !cur_map_ptr.is_null() {
         let cur_map = unsafe { &*cur_map_ptr };
         let name = unsafe { CStr::from_ptr(cur_map.l_name).to_owned() };
-        if let Some(lib) =
-            unsafe { from_raw(name, cur_map.l_addr as usize, cur_map.l_ld, None).unwrap() }
-        {
+        let Some(segments) = create_segments(cur_map.l_addr as usize, usize::MAX) else {
+            cur_map_ptr = cur_map.l_next;
+            continue;
+        };
+        if let Some(lib) = unsafe { from_raw(name, segments, cur_map.l_ld, None).unwrap() } {
             if lib.name().contains("libc.so") {
                 f(unsafe { lib.get::<IterPhdr>("dl_iterate_phdr").unwrap() });
                 #[cfg(feature = "tls")]
@@ -202,9 +218,12 @@ unsafe extern "C" fn callback(info: *mut CDlPhdrInfo, _size: usize, _data: *mut 
             }
         })
         .unwrap() as _;
+    let Some(segments) = create_segments(base, usize::MAX) else {
+        return 0;
+    };
     let Some(lib) = from_raw(
         CStr::from_ptr(info.dlpi_name).to_owned(),
-        base,
+        segments,
         dynamic_ptr,
         Some(core::mem::transmute(phdrs)),
     )

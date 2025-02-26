@@ -4,7 +4,7 @@ use core::ops::Range;
 pub(crate) struct EhFrame;
 
 impl EhFrame {
-    pub(crate) fn new(_phdr: &elf_loader::arch::Phdr, _map_range: Range<usize>) -> Option<Self> {
+    pub(crate) fn new(_phdr: &elf_loader::arch::ElfPhdr, _map_range: Range<usize>) -> Option<Self> {
         None
     }
 }
