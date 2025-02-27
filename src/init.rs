@@ -101,8 +101,6 @@ pub(crate) unsafe fn from_raw(
             dynamic.strtab -= base;
             dynamic.symtab -= base;
             dynamic.hashtab -= base;
-            println!("{:?}", name);
-            println!("{:#x}", dynamic.strtab);
             dynamic.version_idx = dynamic
                 .version_idx
                 .map(|v| NonZero::new(v.get() - base).unwrap());
