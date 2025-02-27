@@ -26,7 +26,7 @@ impl EhFrame {
         };
         let unwind = EhFrame(eh_frame_addr);
 
-        extern "C" {
+        unsafe extern "C" {
             fn __register_frame(begin: *const c_void);
         }
         //在使用libgcc的情况下直接传eh_frame的地址即可
@@ -37,7 +37,7 @@ impl EhFrame {
 
 impl Drop for EhFrame {
     fn drop(&mut self) {
-        extern "C" {
+        unsafe extern "C" {
             fn __deregister_frame(begin: *const c_void);
         }
         unsafe { __deregister_frame(self.0 as _) };

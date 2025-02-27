@@ -33,7 +33,7 @@ impl EhFrame {
 
 impl Drop for EhFrame {
     fn drop(&mut self) {
-        extern "C" {
+        unsafe extern "C" {
             fn __deregister_frame(begin: *const c_void);
         }
 
@@ -68,7 +68,7 @@ impl Drop for EhFrame {
 impl EhFrame {
     #[inline]
     pub(crate) fn register_unwind(&self) {
-        extern "C" {
+        unsafe extern "C" {
             fn __register_frame(begin: *const c_void);
         }
 

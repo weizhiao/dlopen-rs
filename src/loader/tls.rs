@@ -4,8 +4,8 @@ use libc::{
     pthread_setspecific,
 };
 use std::{
-    alloc::{dealloc, handle_alloc_error, Layout},
-    mem::{size_of, MaybeUninit},
+    alloc::{Layout, dealloc, handle_alloc_error},
+    mem::{MaybeUninit, size_of},
     os::raw::c_void,
 };
 use thread_register::{ModifyRegister, ThreadRegister};
@@ -34,8 +34,8 @@ impl ElfTls {
     pub(crate) fn new(phdr: &ElfPhdr, base: usize) -> Self {
         unsafe extern "C" fn dtor(ptr: *mut c_void) {
             if !ptr.is_null() {
-                let layout = ptr.cast::<Layout>().read();
-                dealloc(ptr.cast(), layout);
+                let layout = unsafe { ptr.cast::<Layout>().read() };
+                unsafe { dealloc(ptr.cast(), layout) };
             }
         }
 
@@ -73,30 +73,30 @@ impl Drop for ElfTls {
 
 pub(crate) unsafe extern "C" fn tls_get_addr(tls_index: &TlsIndex) -> *const u8 {
     if tls_index.ti_module > MAX_TLS_INDEX {
-        let tls = &*(tls_index.ti_module as *const TlsInner);
-        let val = pthread_getspecific(tls.key);
+        let tls = unsafe { &*(tls_index.ti_module as *const TlsInner) };
+        let val = unsafe { pthread_getspecific(tls.key) };
         let data = if val.is_null() {
             let layout = tls.layout;
-            let memory = alloc::alloc::alloc_zeroed(layout);
+            let memory = unsafe { alloc::alloc::alloc_zeroed(layout) };
             if memory.is_null() {
                 handle_alloc_error(layout);
             }
-            memory.cast::<Layout>().write(layout);
-            let data = memory.add(tls.offset);
-            data.copy_from_nonoverlapping(tls.image, tls.len);
-            if pthread_setspecific(tls.key, memory.cast()) != 0 {
+            unsafe { memory.cast::<Layout>().write(layout) };
+            let data = unsafe { memory.add(tls.offset) };
+            unsafe { data.copy_from_nonoverlapping(tls.image, tls.len) };
+            if unsafe { pthread_setspecific(tls.key, memory.cast()) } != 0 {
                 return core::ptr::null();
             }
             data
         } else {
-            val.add(tls.offset).cast()
+            unsafe { val.add(tls.offset).cast() }
         };
-        data.add(tls_index.ti_offset.wrapping_add(TLS_DTV_OFFSET))
+        unsafe { data.add(tls_index.ti_offset.wrapping_add(TLS_DTV_OFFSET)) }
     } else {
-        extern "C" {
+        unsafe extern "C" {
             fn __tls_get_addr(tls_index: &TlsIndex) -> *const u8;
         }
-        __tls_get_addr(tls_index)
+        unsafe { __tls_get_addr(tls_index) }
     }
 }
 

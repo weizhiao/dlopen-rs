@@ -1,6 +1,6 @@
 use crate::init::{GDBDebug, LinkMap};
 use core::{
-    ffi::{c_int, CStr},
+    ffi::{CStr, c_int},
     ptr::null_mut,
 };
 use std::sync::Mutex;
@@ -71,7 +71,7 @@ impl DebugInfo {
         if custom_debug.debug.is_null() {
             panic!("Please call init function first");
         }
-        let debug = &mut *custom_debug.debug;
+        let debug = unsafe { &mut *custom_debug.debug };
         let link_map = Box::leak(Box::new(LinkMap {
             l_addr: base as _,
             l_name: name as _,
@@ -82,19 +82,20 @@ impl DebugInfo {
         if tail.is_null() {
             debug.map = link_map;
         } else {
-            (*tail).l_next = link_map;
+            unsafe {
+                (*tail).l_next = link_map;
+            }
         }
         custom_debug.tail = link_map;
         debug.state = RT_ADD;
         (debug.brk)();
         debug.state = RT_CONSISTENT;
         (debug.brk)();
-        log::trace!(
-            "Add debugging information for [{}]",
+        log::trace!("Add debugging information for [{}]", unsafe {
             CStr::from_ptr(name).to_str().unwrap()
-        );
+        });
         DebugInfo {
-            link_map: Box::from_raw(link_map),
+            link_map: unsafe { Box::from_raw(link_map) },
         }
     }
 }

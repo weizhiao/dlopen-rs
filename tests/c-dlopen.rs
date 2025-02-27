@@ -3,7 +3,7 @@ use std::{fs, path::Path, time::Instant};
 
 #[test]
 fn load() {
-    std::env::set_var("LD_BIND_NOW", "1");
+    unsafe { std::env::set_var("LD_BIND_NOW", "1") };
     let path = Path::new("/usr/lib/x86_64-linux-gnu/");
     if !path.is_dir() {
         panic!("input path must be a directory")

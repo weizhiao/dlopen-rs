@@ -3,7 +3,7 @@ use libloading::Library;
 use std::path::Path;
 
 fn main() {
-    std::env::set_var("RUST_LOG", "trace");
+    unsafe { std::env::set_var("RUST_LOG", "trace") };
     env_logger::init();
     dlopen_rs::init();
     let path = Path::new("./target/release/libexample.so");

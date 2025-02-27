@@ -1,20 +1,21 @@
 use crate::{
+    OpenFlags, Result,
     abi::CDlPhdrInfo,
     dl_iterate_phdr::CallBack,
-    register::{global_find, register, DylibState, MANAGER},
-    OpenFlags, Result,
+    register::{DylibState, MANAGER, global_find, register},
 };
 use core::{
-    ffi::{c_char, c_int, c_void, CStr},
+    ffi::{CStr, c_char, c_int, c_void},
     num::NonZero,
-    ptr::{addr_of, addr_of_mut, null_mut, NonNull},
+    ptr::{NonNull, addr_of, addr_of_mut, null_mut},
 };
 use elf_loader::{
+    RelocatedDylib, Symbol, UserData,
     abi::{PT_DYNAMIC, PT_LOAD},
     arch::{Dyn, ElfPhdr},
     dynamic::ElfDynamic,
     segment::{ElfSegments, MASK, PAGE_SIZE},
-    set_global_scope, RelocatedDylib, Symbol, UserData,
+    set_global_scope,
 };
 use spin::Once;
 use std::{env, ffi::CString, os::unix::ffi::OsStringExt, path::PathBuf, sync::Arc};
@@ -40,7 +41,7 @@ pub(crate) struct GDBDebug {
 #[cfg(target_env = "gnu")]
 #[inline]
 fn get_debug_struct() -> &'static mut GDBDebug {
-    extern "C" {
+    unsafe extern "C" {
         static mut _r_debug: GDBDebug;
     }
     unsafe { &mut *addr_of_mut!(_r_debug) }
@@ -63,7 +64,7 @@ pub(crate) static mut ARGC: usize = 0;
 pub(crate) static mut ARGV: Vec<*mut i8> = Vec::new();
 pub(crate) static mut ENVP: usize = 0;
 
-extern "C" {
+unsafe extern "C" {
     static environ: usize;
 }
 
@@ -74,7 +75,7 @@ fn create_segments(base: usize, len: usize) -> Option<ElfSegments> {
         // 如果程序本身不是Shared object file,那么它的这个字段为0,此时无法使用程序本身的符号进行重定位
         log::warn!(
             "Failed to initialize an existing library: [{:?}], Because it's not a Shared object file",
-            unsafe{(*addr_of!(PROGRAM_NAME)).as_ref().unwrap()}
+            unsafe { (*addr_of!(PROGRAM_NAME)).as_ref().unwrap() }
         );
         return None;
     };
@@ -137,14 +138,16 @@ pub(crate) unsafe fn from_raw(
         usize::MAX
     };
     let new_segments = create_segments(segments.base(), len).unwrap();
-    let lib = RelocatedDylib::new_uncheck(
-        name,
-        new_segments.base(),
-        dynamic,
-        phdrs.unwrap_or(&[]),
-        new_segments,
-        user_data,
-    );
+    let lib = unsafe {
+        RelocatedDylib::new_uncheck(
+            name,
+            new_segments.base(),
+            dynamic,
+            phdrs.unwrap_or(&[]),
+            new_segments,
+            user_data,
+        )
+    };
     Ok(Some(lib))
 }
 
@@ -205,7 +208,7 @@ fn init_argv() {
 unsafe extern "C" fn callback(info: *mut CDlPhdrInfo, _size: usize, _data: *mut c_void) -> c_int {
     let info = unsafe { &*info };
     let base = info.dlpi_addr as usize;
-    let phdrs = core::slice::from_raw_parts(info.dlpi_phdr, info.dlpi_phnum as usize);
+    let phdrs = unsafe { core::slice::from_raw_parts(info.dlpi_phdr, info.dlpi_phnum as usize) };
     let dynamic_ptr = phdrs
         .iter()
         .find_map(|phdr| {
@@ -219,12 +222,14 @@ unsafe extern "C" fn callback(info: *mut CDlPhdrInfo, _size: usize, _data: *mut 
     let Some(segments) = create_segments(base, usize::MAX) else {
         return 0;
     };
-    let Some(lib) = from_raw(
-        CStr::from_ptr(info.dlpi_name).to_owned(),
-        segments,
-        dynamic_ptr,
-        Some(core::mem::transmute(phdrs)),
-    )
+    let Some(lib) = unsafe {
+        from_raw(
+            CStr::from_ptr(info.dlpi_name).to_owned(),
+            segments,
+            dynamic_ptr,
+            Some(core::mem::transmute(phdrs)),
+        )
+    }
     .unwrap() else {
         return 0;
     };
@@ -234,11 +239,13 @@ unsafe extern "C" fn callback(info: *mut CDlPhdrInfo, _size: usize, _data: *mut 
     let end = start + lib.map_len();
     let shortname = lib.shortname();
     let name = if shortname == "" {
-        (*addr_of!(PROGRAM_NAME))
-            .as_ref()
-            .unwrap()
-            .to_str()
-            .unwrap()
+        unsafe {
+            (*addr_of!(PROGRAM_NAME))
+                .as_ref()
+                .unwrap()
+                .to_str()
+                .unwrap()
+        }
     } else {
         shortname
     };

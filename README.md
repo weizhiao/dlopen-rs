@@ -2,6 +2,7 @@
 [![](https://img.shields.io/crates/d/dlopen-rs.svg)](https://crates.io/crates/dlopen-rs)
 [![license](https://img.shields.io/crates/l/dlopen-rs.svg)](https://crates.io/crates/dlopen-rs)
 [![dlopen-rs on docs.rs](https://docs.rs/dlopen-rs/badge.svg)](https://docs.rs/dlopen-rs)
+[![Rust](https://img.shields.io/badge/rust-1.85.0%2B-blue.svg?maxAge=3600)](https://github.com/weizhiao/dlopen_rs)
 # dlopen-rs
 
 English | [中文](README-zh_cn.md)  
@@ -32,7 +33,7 @@ Currently, it supports `x86_64`, `RV64`, and `AArch64` architectures.
 
 ## Feature
 | Feature   | Default | Description                                                                                                                                           |
-| --------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |                                                  
+| --------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | std       | Yes     | Enable `std`                                                                                                                                          |
 | debug     | No      | Enable this to use gdb/lldb for debugging loaded dynamic libraries. Note that only dynamic libraries loaded using dlopen-rs can be debugged with gdb. |
 | mmap      | Yes     | Enable default implementation on platforms with mmap                                                                                                  |  |
@@ -115,6 +116,9 @@ fn main() {
     print("dlopen-rs: hello world");
 }
 ```
+
+## Minimum Supported Rust Version
+Rust 1.85 or higher.
 
 ## TODO
 * dlinfo have not been implemented yet. dlerror currently only returns NULL.  

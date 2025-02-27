@@ -6,20 +6,19 @@ pub(crate) mod tls;
 #[cfg(feature = "debug")]
 use super::debug::DebugInfo;
 use crate::{
-    find_lib_error, find_symbol_error,
-    register::{register, DylibState, MANAGER},
-    OpenFlags, Result,
+    OpenFlags, Result, find_lib_error, find_symbol_error,
+    register::{DylibState, MANAGER, register},
 };
 use alloc::{boxed::Box, format, sync::Arc, vec::Vec};
 use core::{any::Any, ffi::CStr, fmt::Debug};
 use ehframe::EhFrame;
 use elf_loader::{
+    CoreComponent, CoreComponentRef, ElfDylib, Loader, RelocatedDylib, Symbol, UserData,
     abi::PT_GNU_EH_FRAME,
     arch::{ElfPhdr, ElfRela},
     mmap::MmapImpl,
     object::{ElfBinary, ElfObject},
     segment::ElfSegments,
-    CoreComponent, CoreComponentRef, ElfDylib, Loader, RelocatedDylib, Symbol, UserData,
 };
 
 pub(crate) const EH_FRAME_ID: u8 = 0;
@@ -503,8 +502,10 @@ impl Dylib {
         name: &str,
         version: &str,
     ) -> Result<Symbol<'lib, T>> {
-        self.inner
-            .get_version(name, version)
-            .ok_or(find_symbol_error(format!("can not find symbol:{}", name)))
+        unsafe {
+            self.inner
+                .get_version(name, version)
+                .ok_or(find_symbol_error(format!("can not find symbol:{}", name)))
+        }
     }
 }

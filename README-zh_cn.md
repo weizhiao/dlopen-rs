@@ -2,6 +2,7 @@
 [![](https://img.shields.io/crates/d/dlopen-rs.svg)](https://crates.io/crates/dlopen-rs)
 [![license](https://img.shields.io/crates/l/dlopen-rs.svg)](https://crates.io/crates/dlopen-rs)
 [![dlopen-rs on docs.rs](https://docs.rs/dlopen-rs/badge.svg)](https://docs.rs/dlopen-rs)
+[![Rust](https://img.shields.io/badge/rust-1.85.0%2B-blue.svg?maxAge=3600)](https://github.com/weizhiao/dlopen_rs)
 # dlopen-rs
 
 [文档](https://docs.rs/dlopen-rs/)
@@ -112,6 +113,10 @@ fn main() {
     print("dlopen-rs: hello world");
 }
 ```
+
+## 最低编译器版本支持
+Rust 1.85.0及以上
+
 ## 未完成
 * dlinfo还未实现。dlerror目前只会返回NULL。
 * dlsym的RTLD_NEXT还未实现。

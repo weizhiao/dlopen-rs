@@ -1,7 +1,7 @@
 use crate::{
-    loader::{builtin, create_lazy_scope, deal_unknown, Dylib, ElfLibrary},
-    register::{register, DylibState, MANAGER},
     OpenFlags, Result,
+    loader::{Dylib, ElfLibrary, builtin, create_lazy_scope, deal_unknown},
+    register::{DylibState, MANAGER, register},
 };
 use alloc::{borrow::ToOwned, sync::Arc, vec::Vec};
 use core::ffi::{c_char, c_int, c_void};
@@ -124,11 +124,11 @@ fn dlopen_impl(path: &str, flags: OpenFlags, f: impl Fn() -> Result<ElfLibrary>)
                     {
                         let shortname = lib.shortname().to_owned();
                         log::debug!(
-							"Trying to update a library. Name: [{}] Old flags:[{:?}] New flags:[{:?}]",
-							shortname,
-							lib.flags(),
-							flags
-						);
+                            "Trying to update a library. Name: [{}] Old flags:[{:?}] New flags:[{:?}]",
+                            shortname,
+                            lib.flags(),
+                            flags
+                        );
                         lib.set_flags(flags);
                         let core = lib.relocated_dylib();
                         lock.global.insert(shortname, core);
@@ -228,7 +228,7 @@ fn dlopen_impl(path: &str, flags: OpenFlags, f: impl Fn() -> Result<ElfLibrary>)
             lazy_scope,
         )?;
     }
-	drop(read_lock);
+    drop(read_lock);
     let deps = Arc::new(dep_libs.into_boxed_slice());
     if !flags.contains(OpenFlags::CUSTOM_NOT_REGISTER) {
         recycler.is_recycler = false;
@@ -253,7 +253,7 @@ fn dlopen_impl(path: &str, flags: OpenFlags, f: impl Fn() -> Result<ElfLibrary>)
 
 #[cfg(feature = "std")]
 pub mod imp {
-    use crate::{find_lib_error, Result};
+    use crate::{Result, find_lib_error};
     use core::str::FromStr;
     use dynamic_loader_cache::{Cache as LdCache, Result as LdResult};
     use spin::Lazy;
@@ -357,7 +357,7 @@ pub unsafe extern "C" fn dlopen(filename: *const c_char, flags: c_int) -> *const
         #[cfg(feature = "std")]
         {
             let flags = OpenFlags::from_bits_retain(flags as _);
-            let filename = core::ffi::CStr::from_ptr(filename);
+            let filename = unsafe { core::ffi::CStr::from_ptr(filename) };
             let path = filename.to_str().unwrap();
             if let Ok(lib) = ElfLibrary::dlopen(path, flags) {
                 lib

@@ -1,7 +1,8 @@
 [package]
 name = "dlopen-rs"
 version = "0.7.1"
-edition = "2021"
+edition = "2024"
+rust-version = "1.85.0"
 authors = ["wzhao <1207410841@qq.com>"]
 readme = "README.md"
 repository = "https://github.com/weizhiao/dlopen-rs"
@@ -72,7 +73,7 @@ cfg-if = '1.0'
 log = "0.4.22"
 
 [features]
-default = ["mmap", "tls", "libgcc", "debug"]
+default = ["mmap", "tls", "libgcc", "debug", "version"]
 # enable this when you want to use gdb/lldb to debug the loaded dynamic libraries
 debug = ["std"]
 # enable std

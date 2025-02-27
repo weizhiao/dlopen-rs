@@ -8,7 +8,7 @@ extern "C" fn mymalloc(size: size_t) -> *mut c_void {
 }
 
 fn main() {
-    std::env::set_var("RUST_LOG", "debug");
+    unsafe { std::env::set_var("RUST_LOG", "debug") };
     env_logger::init();
     dlopen_rs::init();
     let path = Path::new("./target/release/libexample.so");
