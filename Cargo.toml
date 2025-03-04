@@ -1,6 +1,6 @@
 [package]
 name = "dlopen-rs"
-version = "0.7.2"
+version = "0.7.3"
 edition = "2024"
 rust-version = "1.85.0"
 authors = ["wzhao <1207410841@qq.com>"]

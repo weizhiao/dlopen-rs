@@ -132,9 +132,6 @@ Rust 1.85 or higher.
 * dlinfo have not been implemented yet. dlerror currently only returns NULL.  
 * RTLD_NEXT for dlsym has not been implemented.
 * When dlopen fails, the newly loaded dynamic library is destroyed, but the functions in .fini are not called.
-* It is unclear whether there is a way to support more relocation types.
-* There is a lack of correctness and performance testing under high-concurrency multithreading scenarios.
-* More tests.
 
 ## Supplement
 If you encounter any issues during use, feel free to raise them on GitHub. We warmly welcome everyone to contribute code to help improve the functionality of dlopen-rs. 😊

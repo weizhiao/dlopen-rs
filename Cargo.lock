@@ -261,7 +261,7 @@ dependencies = [
 
 [[package]]
 name = "dlopen-rs"
-version = "0.7.2"
+version = "0.7.3"
 dependencies = [
  "bitflags",
  "cfg-if",
