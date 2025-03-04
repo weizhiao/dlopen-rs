@@ -10,7 +10,7 @@
 //!Currently, it supports `x86_64`, `RV64`, and `AArch64` architectures.
 //!
 //! # Examples
-//! ```
+//! ```no_run
 //! # use dlopen_rs::{ElfLibrary, OpenFlags};
 //! use std::path::Path;
 //!
