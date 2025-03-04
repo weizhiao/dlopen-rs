@@ -25,5 +25,6 @@ if [ "${OP}" = "build" ]; then
 elif [ "${OP}" = "test" ]; then
 	"${CARGO}" -vv ${OP} --target="${TARGET}" --no-default-features --features "${FEATURES}" -- --nocapture
 else
+	"${CARGO}" -vv ${OP} --target="${TARGET}" --no-default-features --features "${FEATURES}"
 fi
 
