@@ -11,13 +11,13 @@ impl Drop for Dylib {
         {
             return;
         }
+        let mut lock = MANAGER.write();
         let ref_count = self.inner.strong_count();
         // Dylib本身 + 全局
         let threshold =
             2 + self.deps.is_some() as usize + self.flags.contains(OpenFlags::RTLD_GLOBAL) as usize;
         if ref_count == threshold {
             log::info!("Destroying dylib [{}]", self.inner.shortname());
-            let mut lock = MANAGER.write();
             lock.all.shift_remove(self.inner.shortname());
             if self.flags.contains(OpenFlags::RTLD_GLOBAL) {
                 lock.global.shift_remove(self.inner.shortname());
@@ -205,7 +205,6 @@ pub(crate) fn global_find(name: &str) -> Option<*const ()> {
                     );
                     let val = sym.into_raw();
                     assert!(lib.base() != val as usize);
-                    //println!("{:x} {:x}", lib.base(), val as usize);
                     val
                 })
             })

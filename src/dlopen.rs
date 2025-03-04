@@ -60,7 +60,7 @@ impl Drop for Recycler {
 fn dlopen_impl(path: &str, flags: OpenFlags, f: impl Fn() -> Result<ElfLibrary>) -> Result<Dylib> {
     let shortname = path.split('/').last().unwrap();
     log::info!("dlopen: Try to open [{}] with [{:?}] ", path, flags);
-    let reader = MANAGER.read();
+    let mut lock = MANAGER.write();
     // 新加载的动态库
     let mut new_libs = Vec::new();
     let core = if flags.contains(OpenFlags::CUSTOM_NOT_REGISTER) {
@@ -70,7 +70,7 @@ fn dlopen_impl(path: &str, flags: OpenFlags, f: impl Fn() -> Result<ElfLibrary>)
         unsafe { RelocatedDylib::from_core_component(core) }
     } else {
         // 检查是否是已经加载的库
-        if let Some(lib) = reader.all.get(shortname) {
+        if let Some(lib) = lock.all.get(shortname) {
             if lib.deps().is_some()
                 && !flags
                     .difference(lib.flags())
@@ -87,8 +87,6 @@ fn dlopen_impl(path: &str, flags: OpenFlags, f: impl Fn() -> Result<ElfLibrary>)
         }
     };
 
-    drop(reader);
-
     let mut recycler = Recycler {
         is_recycler: true,
         old_all_len: usize::MAX,
@@ -99,11 +97,8 @@ fn dlopen_impl(path: &str, flags: OpenFlags, f: impl Fn() -> Result<ElfLibrary>)
     let mut dep_libs = Vec::new();
     let mut cur_pos = 0;
     dep_libs.push(core.clone());
-    let mut lock = MANAGER.write();
     recycler.old_all_len = lock.all.len();
     recycler.old_global_len = lock.global.len();
-
-    register(core, flags, None, &mut lock, DylibState::default());
 
     #[cfg(feature = "std")]
     let mut cur_newlib_pos = 0;
@@ -215,26 +210,8 @@ fn dlopen_impl(path: &str, flags: OpenFlags, f: impl Fn() -> Result<ElfLibrary>)
         order.push(item.idx);
     }
 
-    let read_lock = lock.downgrade();
-    for idx in order {
-        let lib = core::mem::take(&mut new_libs[idx]).unwrap();
-        let lazy_scope = create_lazy_scope(&dep_libs, lib.dylib.is_lazy());
-        log::debug!("Relocating dylib [{}]", lib.name());
-        let iter = read_lock.global.values().chain(dep_libs.iter());
-        lib.dylib.relocate(
-            iter,
-            &|name| builtin::BUILTIN.get(name).copied(),
-            deal_unknown,
-            lazy_scope,
-        )?;
-    }
-    drop(read_lock);
     let deps = Arc::new(dep_libs.into_boxed_slice());
-    if !flags.contains(OpenFlags::CUSTOM_NOT_REGISTER) {
-        recycler.is_recycler = false;
-    }
     let core = deps[0].clone();
-
     let res = Dylib {
         inner: core.clone(),
         flags,
@@ -244,10 +221,26 @@ fn dlopen_impl(path: &str, flags: OpenFlags, f: impl Fn() -> Result<ElfLibrary>)
     register(
         core,
         flags,
-        Some(deps),
-        &mut MANAGER.write(),
+        Some(deps.clone()),
+        &mut lock,
         *DylibState::default().set_relocated(),
     );
+    let read_lock = lock.downgrade();
+    for idx in order {
+        let lib = core::mem::take(&mut new_libs[idx]).unwrap();
+        let lazy_scope = create_lazy_scope(&deps, lib.dylib.is_lazy());
+        log::debug!("Relocating dylib [{}]", lib.name());
+        let iter = read_lock.global.values().chain(deps.iter());
+        lib.dylib.relocate(
+            iter,
+            &|name| builtin::BUILTIN.get(name).copied(),
+            deal_unknown,
+            lazy_scope,
+        )?;
+    }
+    if !flags.contains(OpenFlags::CUSTOM_NOT_REGISTER) {
+        recycler.is_recycler = false;
+    }
     Ok(res)
 }
 

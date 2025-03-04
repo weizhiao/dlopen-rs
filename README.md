@@ -44,12 +44,12 @@ $ RUST_LOG=trace LD_PRELOAD=./target/release/libdlopen.so ./target/release/examp
 
 ## Architecture Support
 
-| Arch        | Support | Lazy Binding | Test |
-| ----------- | ------- | ------------ | ---- |
-| x86_64      | ✅       | ✅            | ✅    |
-| aarch64     | ✅       | ✅            | ✅    |
-| riscv64     | ✅       | ✅            | ✅    |
-| loongarch64 | ✅       | ❌            | ✅    |
+| Arch        | Support | Lazy Binding | Test    |
+| ----------- | ------- | ------------ | ------- |
+| x86_64      | ✅       | ✅            | ✅(CI)   |
+| aarch64     | ✅       | ✅            | ✅(QEMU) |
+| riscv64     | ✅       | ✅            | ✅(QEMU) |
+| loongarch64 | ✅       | ❌            | ❌       |
 
 ## Examples
 

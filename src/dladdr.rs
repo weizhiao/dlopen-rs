@@ -57,9 +57,11 @@ impl Debug for DlInfo {
 
 impl ElfLibrary {
     fn addr2dso(addr: usize) -> Option<Dylib> {
+        log::trace!("addr2dso: addr [{:#x}]", addr);
         MANAGER.read().all.values().find_map(|v| {
             let start = v.relocated_dylib_ref().base();
             let end = start + v.relocated_dylib_ref().map_len();
+            log::trace!("addr2dso: [{}] [{:#x}]-[{:#x}]", v.shortname(), start, end);
             if (start..end).contains(&addr) {
                 Some(v.get_dylib())
             } else {

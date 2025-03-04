@@ -44,12 +44,12 @@ RUST_LOG=trace LD_PRELOAD=./target/release/libdlopen.so ./target/release/example
 
 ## 指令集支持
 
-| 指令集      | 支持 | 延迟绑定 | 测试 |
-| ----------- | ---- | -------- | ---- |
-| x86_64      | ✅    | ✅        | ✅    |
-| aarch64     | ✅    | ✅        | ✅    |
-| riscv64     | ✅    | ✅        | ✅    |
-| loongarch64 | ✅    | ❌        | ✅    |
+| 指令集      | 支持 | 延迟绑定 | 测试    |
+| ----------- | ---- | -------- | ------- |
+| x86_64      | ✅    | ✅        | ✅(CI)   |
+| aarch64     | ✅    | ✅        | ✅(QEMU) |
+| riscv64     | ✅    | ✅        | ✅(QEMU) |
+| loongarch64 | ✅    | ❌        | ❌       |
 
 ## 示例
 

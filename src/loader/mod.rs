@@ -493,8 +493,10 @@ impl Dylib {
     /// Load a versioned symbol from the dynamic library.
     ///
     /// # Examples
-    /// ```
-    /// let symbol = unsafe { lib.get_version::<fn()>>("function_name", "1.0").unwrap() };
+    /// ```no_run
+    /// # use dlopen_rs::{Symbol, ElfLibrary ,OpenFlags};
+    /// # let lib = ElfLibrary::dlopen("awesome.so", OpenFlags::RTLD_NOW).unwrap();
+    /// let symbol = unsafe { lib.get_version::<fn()>("function_name", "1.0").unwrap() };
     /// ```
     #[cfg(feature = "version")]
     #[inline]

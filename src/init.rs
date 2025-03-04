@@ -61,7 +61,7 @@ static ONCE: Once = Once::new();
 static mut PROGRAM_NAME: Option<PathBuf> = None;
 
 pub(crate) static mut ARGC: usize = 0;
-pub(crate) static mut ARGV: Vec<*mut i8> = Vec::new();
+pub(crate) static mut ARGV: Vec<*mut c_char> = Vec::new();
 pub(crate) static mut ENVP: usize = 0;
 
 unsafe extern "C" {
@@ -94,11 +94,10 @@ pub(crate) unsafe fn from_raw(
     #[allow(unused_mut)]
     let mut dynamic = ElfDynamic::new(dynamic_ptr, &segments)?;
 
-    #[cfg(target_env = "gnu")]
-    {
-        // 因为glibc会修改dynamic段中的信息，所以这里需要手动恢复一下
-        if !name.to_str().unwrap().contains("linux-vdso.so.1") {
-            let base = segments.base();
+    // 因为glibc会修改dynamic段中的信息，所以这里需要手动恢复一下。
+    if !name.to_str().unwrap().contains("linux-vdso.so.1") {
+        let base = segments.base();
+        if dynamic.strtab > 2 * base {
             dynamic.strtab -= base;
             dynamic.symtab -= base;
             dynamic.hashtab -= base;
@@ -107,6 +106,7 @@ pub(crate) unsafe fn from_raw(
                 .map(|v| NonZero::new(v.get() - base).unwrap());
         }
     }
+
     #[allow(unused_mut)]
     let mut user_data = UserData::empty();
     #[cfg(feature = "debug")]
@@ -117,7 +117,7 @@ pub(crate) unsafe fn from_raw(
                 crate::loader::DEBUG_INFO_ID,
                 Box::new(DebugInfo::new(
                     segments.base(),
-                    name.as_ptr(),
+                    name.as_ptr() as _,
                     dynamic_ptr as usize,
                 )),
             );

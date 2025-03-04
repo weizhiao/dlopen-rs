@@ -1,6 +1,6 @@
 use crate::init::{GDBDebug, LinkMap};
 use core::{
-    ffi::{CStr, c_int},
+    ffi::{CStr, c_char, c_int},
     ptr::null_mut,
 };
 use std::sync::Mutex;
@@ -65,7 +65,7 @@ pub(crate) static DEBUG: Mutex<CustomDebug> = Mutex::new(CustomDebug {
 });
 
 impl DebugInfo {
-    pub(crate) unsafe fn new(base: usize, name: *const i8, dynamic: usize) -> DebugInfo {
+    pub(crate) unsafe fn new(base: usize, name: *const c_char, dynamic: usize) -> DebugInfo {
         let mut custom_debug = DEBUG.lock().unwrap();
         let tail = custom_debug.tail;
         if custom_debug.debug.is_null() {
