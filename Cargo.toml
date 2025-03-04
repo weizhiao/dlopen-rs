@@ -64,8 +64,7 @@ version = "0.2.1"
 optional = true
 
 [dependencies.thread-register]
-path = "../thread-register"
-version = "0.1.0"
+version = "0.1.1"
 optional = true
 
 [dependencies]
