@@ -181,6 +181,7 @@ pub(crate) fn create_lazy_scope(
 
 fn from_impl(object: impl ElfObject, flags: OpenFlags) -> Result<ElfLibrary> {
     let mut loader = Loader::<MmapImpl>::new();
+    loader.set_hook(Box::new(parse_phdr));
     #[cfg(feature = "std")]
     unsafe {
         loader.set_init_params(
@@ -196,7 +197,7 @@ fn from_impl(object: impl ElfObject, flags: OpenFlags) -> Result<ElfLibrary> {
     } else {
         None
     };
-    let dylib = loader.load_dylib(object, lazy_bind, parse_phdr)?;
+    let dylib = loader.load_dylib(object, lazy_bind)?;
     log::debug!(
         "Loading dylib [{}] at address [0x{:x}-0x{:x}]",
         dylib.name(),

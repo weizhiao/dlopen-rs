@@ -3,6 +3,7 @@
 [![license](https://img.shields.io/crates/l/dlopen-rs.svg)](https://crates.io/crates/dlopen-rs)
 [![dlopen-rs on docs.rs](https://docs.rs/dlopen-rs/badge.svg)](https://docs.rs/dlopen-rs)
 [![Rust](https://img.shields.io/badge/rust-1.85.0%2B-blue.svg?maxAge=3600)](https://github.com/weizhiao/dlopen_rs)
+[![Build Status](https://github.com/weizhiao/dlopen-rs/actions/workflows/rust.yml/badge.svg)](https://github.com/weizhiao/dlopen-rs/actions)
 # dlopen-rs
 
 English | [中文](README-zh_cn.md)  
@@ -22,8 +23,6 @@ $ cargo build -r -p dlopen-rs --example preload
 $ RUST_LOG=trace LD_PRELOAD=./target/release/libdlopen.so ./target/release/examples/preload
 ```
 
-Currently, it supports `x86_64`, `RV64`, and `AArch64` architectures.
-
 ## Advantages
 1. Provides support for loading ELF dynamic libraries to #![no_std] targets.
 2. Enables easy runtime replacement of symbols in shared libraries with custom implementations.
@@ -42,6 +41,15 @@ Currently, it supports `x86_64`, `RV64`, and `AArch64` architectures.
 | unwinding | No      | Enable this to use the exception handling mechanism provided by dlopen-rs.                                                                            |
 | libgcc    | Yes     | Enable this if the program uses libgcc to handle exceptions.                                                                                          |
 | libunwind | No      | Enable this if the program uses libunwind to handle exceptions.                                                                                       |
+
+## Architecture Support
+
+| Arch        | Support | Lazy Binding | Test |
+| ----------- | ------- | ------------ | ---- |
+| x86_64      | ✅       | ✅            | ✅    |
+| aarch64     | ✅       | ✅            | ✅    |
+| riscv64     | ✅       | ✅            | ✅    |
+| loongarch64 | ✅       | ❌            | ✅    |
 
 ## Examples
 

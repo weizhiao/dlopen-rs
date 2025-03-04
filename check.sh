@@ -11,4 +11,3 @@ cargo check -p dlopen-rs  --no-default-features --features="version"
 # 检查常规组合
 cargo check -p dlopen-rs  --no-default-features --features="mmap,libgcc,tls,debug"
 cargo check -p dlopen-rs  --no-default-features --features="libgcc,tls,debug,version"
-cargo check -p dlopen-rs  --no-default-features --features="libgcc,tls,debug,version"

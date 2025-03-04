@@ -3,6 +3,7 @@
 [![license](https://img.shields.io/crates/l/dlopen-rs.svg)](https://crates.io/crates/dlopen-rs)
 [![dlopen-rs on docs.rs](https://docs.rs/dlopen-rs/badge.svg)](https://docs.rs/dlopen-rs)
 [![Rust](https://img.shields.io/badge/rust-1.85.0%2B-blue.svg?maxAge=3600)](https://github.com/weizhiao/dlopen_rs)
+[![Build Status](https://github.com/weizhiao/dlopen-rs/actions/workflows/rust.yml/badge.svg)](https://github.com/weizhiao/dlopen-rs/actions)
 # dlopen-rs
 
 [文档](https://docs.rs/dlopen-rs/)
@@ -40,6 +41,16 @@ RUST_LOG=trace LD_PRELOAD=./target/release/libdlopen.so ./target/release/example
 | unwinding | 否           | 启用后可以使用 dlopen-rs 提供的异常处理机制。                                                      |
 | libgcc    | 是           | 如果程序使用 libgcc 处理异常，启用此特性。                                                         |
 | libunwind | 否           | 如果程序使用 libunwind 处理异常，启用此特性。                                                      |
+
+## 指令集支持
+
+| 指令集      | 支持 | 延迟绑定 | 测试 |
+| ----------- | ---- | -------- | ---- |
+| x86_64      | ✅    | ✅        | ✅    |
+| aarch64     | ✅    | ✅        | ✅    |
+| riscv64     | ✅    | ✅        | ✅    |
+| loongarch64 | ✅    | ❌        | ✅    |
+
 ## 示例
 
 ### 示例1
