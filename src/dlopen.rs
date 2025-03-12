@@ -3,7 +3,7 @@ use crate::{
     loader::{Dylib, ElfLibrary, builtin, create_lazy_scope, deal_unknown},
     register::{DylibState, MANAGER, register},
 };
-use alloc::{borrow::ToOwned, sync::Arc, vec::Vec};
+use alloc::{borrow::ToOwned, boxed::Box, sync::Arc, vec::Vec};
 use core::ffi::{c_char, c_int, c_void};
 use elf_loader::RelocatedDylib;
 
