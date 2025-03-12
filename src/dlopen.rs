@@ -226,16 +226,21 @@ fn dlopen_impl(path: &str, flags: OpenFlags, f: impl Fn() -> Result<ElfLibrary>)
         *DylibState::default().set_relocated(),
     );
     let read_lock = lock.downgrade();
+    let lazy_scope = create_lazy_scope(&deps);
     for idx in order {
         let lib = core::mem::take(&mut new_libs[idx]).unwrap();
-        let lazy_scope = create_lazy_scope(&deps, lib.dylib.is_lazy());
         log::debug!("Relocating dylib [{}]", lib.name());
         let iter = read_lock.global.values().chain(deps.iter());
+        let is_lazy = lib.dylib.is_lazy();
         lib.dylib.relocate(
             iter,
             &|name| builtin::BUILTIN.get(name).copied(),
             deal_unknown,
-            lazy_scope,
+            if is_lazy {
+                Some(Box::new(|name| lazy_scope(name)))
+            } else {
+                None
+            },
         )?;
     }
     if !flags.contains(OpenFlags::CUSTOM_NOT_REGISTER) {

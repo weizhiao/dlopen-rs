@@ -316,6 +316,7 @@ dependencies = [
  "cfg-if",
  "elf",
  "libc",
+ "log",
 ]
 
 [[package]]

@@ -57,7 +57,7 @@ features = ['macros']
 [dependencies.elf_loader]
 version = "=0.9.3"
 default-features = false
-features = ["use-libc"]
+features = ["use-libc", "log"]
 
 [dependencies.dynamic-loader-cache]
 version = "0.2.1"

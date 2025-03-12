@@ -153,30 +153,24 @@ pub(crate) fn deal_unknown<'scope>(
 #[inline]
 pub(crate) fn create_lazy_scope(
     deps: &[RelocatedDylib],
-    is_lazy: bool,
-) -> Option<Box<dyn for<'a> Fn(&'a str) -> Option<*const ()>>> {
-    if is_lazy {
-        let deps_weak: Vec<CoreComponentRef> = deps
-            .iter()
-            .map(|dep| unsafe { dep.core_component_ref().downgrade() })
-            .collect();
-        Some(Box::new(move |name: &str| {
-            deps_weak.iter().find_map(|dep| unsafe {
-                let lib = RelocatedDylib::from_core_component(dep.upgrade().unwrap());
-                lib.get::<()>(name).map(|sym| {
-                    log::trace!(
-                        "Lazy Binding: find symbol [{}] from [{}] in local scope ",
-                        name,
-                        lib.name()
-                    );
-                    sym.into_raw()
-                })
+) -> Arc<dyn for<'a> Fn(&'a str) -> Option<*const ()>> {
+    let deps_weak: Vec<CoreComponentRef> = deps
+        .iter()
+        .map(|dep| unsafe { dep.core_component_ref().downgrade() })
+        .collect();
+    Arc::new(move |name: &str| {
+        deps_weak.iter().find_map(|dep| unsafe {
+            let lib = RelocatedDylib::from_core_component(dep.upgrade().unwrap());
+            lib.get::<()>(name).map(|sym| {
+                log::trace!(
+                    "Lazy Binding: find symbol [{}] from [{}] in local scope ",
+                    name,
+                    lib.name()
+                );
+                sym.into_raw()
             })
         })
-            as Box<dyn Fn(&str) -> Option<*const ()> + 'static>)
-    } else {
-        None
-    }
+    })
 }
 
 fn from_impl(object: impl ElfObject, flags: OpenFlags) -> Result<ElfLibrary> {
@@ -310,13 +304,13 @@ impl ElfLibrary {
         deps.push(unsafe { RelocatedDylib::from_core_component(self.dylib.core_component()) });
         deps.extend(libs.iter().map(|lib| lib.inner.clone()));
         let deps = Arc::new(deps.into_boxed_slice());
-        let lazy_scope = create_lazy_scope(&deps, self.dylib.is_lazy());
+        let lazy_scope = create_lazy_scope(&deps);
         let cur_lib: RelocatedDylib<'static> = unsafe {
             core::mem::transmute(self.dylib.relocate(
                 deps.iter(),
                 find,
                 deal_unknown,
-                lazy_scope,
+                Some(Box::new(|name| lazy_scope(name))),
             )?)
         };
         if !self.flags.contains(OpenFlags::CUSTOM_NOT_REGISTER) {
