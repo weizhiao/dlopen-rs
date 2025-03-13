@@ -16,7 +16,7 @@ use elf_loader::{
     CoreComponent, CoreComponentRef, ElfDylib, Loader, RelocatedDylib, Symbol, UserData,
     abi::PT_GNU_EH_FRAME,
     arch::{ElfPhdr, ElfRela},
-    mmap::MmapImpl,
+    mmap::{Mmap, MmapImpl},
     object::{ElfBinary, ElfObject},
     segment::ElfSegments,
 };
@@ -37,6 +37,10 @@ pub(crate) fn find_symbol<'lib, T>(
     libs.iter()
         .find_map(|lib| unsafe { lib.get::<T>(name) })
         .ok_or(find_symbol_error(format!("can not find symbol:{}", name)))
+}
+
+pub trait Builder {
+    fn create_object(path: &str) -> Result<impl ElfObject>;
 }
 
 /// An unrelocated dynamic library
@@ -202,6 +206,23 @@ fn from_impl(object: impl ElfObject, flags: OpenFlags) -> Result<ElfLibrary> {
     Ok(lib)
 }
 
+pub(super) struct FileBuilder;
+
+#[cfg(feature = "std")]
+impl Builder for FileBuilder {
+    fn create_object(path: &str) -> Result<impl ElfObject> {
+        use elf_loader::object::ElfFile;
+        Ok(ElfFile::from_path(path)?)
+    }
+}
+
+#[cfg(not(feature = "std"))]
+impl Builder for FileBuilder {
+    fn create_object(path: &str) -> Result<impl ElfObject> {
+        Err::<ElfBinary, crate::Error>(find_lib_error(path))
+    }
+}
+
 impl ElfLibrary {
     /// Find and load a elf dynamic library from path.
     ///
@@ -221,32 +242,16 @@ impl ElfLibrary {
     #[cfg(feature = "std")]
     #[inline]
     pub fn from_file(path: impl AsRef<std::ffi::OsStr>, flags: OpenFlags) -> Result<Self> {
-        let path = path.as_ref().to_str().unwrap();
-        let file = std::fs::File::open(path)?;
-        Self::from_open_file(file, path, flags)
+        ElfLibrary::from_builder::<FileBuilder, MmapImpl>(path.as_ref().to_str().unwrap(), flags)
     }
 
-    /// Creates a new `ElfLibrary` instance from an open file handle.
-    /// The `flags` argument can control how dynamic libraries are loaded.
-    /// # Examples
-    /// ```no_run
-    /// # use std::fs::File;
-    /// # use dlopen_rs::{ElfLibrary ,OpenFlags};
-    /// let file = File::open("/path/to/awesome.module").unwrap();
-    /// let lib = ElfLibrary::from_open_file(file, "/path/to/awesome.module", OpenFlags::RTLD_LOCAL).unwrap();
-    /// ```
-    #[cfg(feature = "std")]
     #[inline]
-    pub fn from_open_file(
-        file: std::fs::File,
-        path: impl AsRef<str>,
-        flags: OpenFlags,
-    ) -> Result<ElfLibrary> {
-        use std::os::fd::IntoRawFd;
-
-        use elf_loader::object;
-        let file = unsafe { object::ElfFile::from_owned_fd(path.as_ref(), file.into_raw_fd()) };
-        from_impl(file, flags)
+    pub fn from_builder<B, M>(path: &str, flags: OpenFlags) -> Result<Self>
+    where
+        B: Builder,
+        M: Mmap,
+    {
+        from_impl(B::create_object(path)?, flags)
     }
 
     /// Load a elf dynamic library from bytes.

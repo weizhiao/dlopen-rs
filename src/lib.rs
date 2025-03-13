@@ -46,10 +46,10 @@ use alloc::{
 use bitflags::bitflags;
 use core::{any::Any, fmt::Display};
 
-pub use elf_loader::Symbol;
+pub use elf_loader::{Symbol, mmap::Mmap};
 #[cfg(feature = "std")]
 pub use init::init;
-pub use loader::{Dylib, ElfLibrary};
+pub use loader::{Builder, Dylib, ElfLibrary};
 
 #[cfg(not(any(
     target_arch = "x86_64",

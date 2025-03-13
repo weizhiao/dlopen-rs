@@ -1,11 +1,46 @@
 use crate::{
-    OpenFlags, Result,
-    loader::{Dylib, ElfLibrary, builtin, create_lazy_scope, deal_unknown},
+    OpenFlags, Result, find_lib_error,
+    loader::{Builder, Dylib, ElfLibrary, FileBuilder, builtin, create_lazy_scope, deal_unknown},
     register::{DylibState, MANAGER, register},
 };
-use alloc::{borrow::ToOwned, boxed::Box, sync::Arc, vec::Vec};
+use alloc::{
+    borrow::ToOwned,
+    boxed::Box,
+    format,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 use core::ffi::{c_char, c_int, c_void};
-use elf_loader::RelocatedDylib;
+use elf_loader::{
+    RelocatedDylib,
+    mmap::{Mmap, MmapImpl},
+};
+use spin::Lazy;
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+struct ElfPath {
+    path: String,
+}
+
+impl ElfPath {
+    fn from_str(path: &str) -> Result<Self> {
+        Ok(ElfPath {
+            path: path.to_owned(),
+        })
+    }
+
+    fn join(&self, file_name: &str) -> ElfPath {
+        let mut new = self.path.clone();
+        new.push('/');
+        new.push_str(file_name);
+        ElfPath { path: new }
+    }
+
+    fn as_str(&self) -> &str {
+        &self.path
+    }
+}
 
 impl ElfLibrary {
     /// Load a shared library from a specified path. It is the same as dlopen.
@@ -21,9 +56,28 @@ impl ElfLibrary {
     #[cfg(feature = "std")]
     #[inline]
     pub fn dlopen(path: impl AsRef<std::ffi::OsStr>, flags: OpenFlags) -> Result<Dylib> {
-        dlopen_impl(path.as_ref().to_str().unwrap(), flags, || {
+        dlopen_impl::<FileBuilder, MmapImpl>(path.as_ref().to_str().unwrap(), flags, || {
             ElfLibrary::from_file(path.as_ref(), flags)
         })
+    }
+
+    #[inline]
+    pub fn dlopen_from_builder<B, M>(
+        path: &str,
+        bytes: Option<&[u8]>,
+        flags: OpenFlags,
+    ) -> Result<Dylib>
+    where
+        B: Builder,
+        M: Mmap,
+    {
+        if let Some(bytes) = bytes {
+            dlopen_impl::<B, M>(path, flags, || ElfLibrary::from_binary(bytes, path, flags))
+        } else {
+            dlopen_impl::<B, M>(path, flags, || {
+                ElfLibrary::from_builder::<B, M>(path, flags)
+            })
+        }
     }
 
     /// Load a shared library from bytes. It is the same as dlopen. However, it can also be used in the no_std environment,
@@ -34,7 +88,7 @@ impl ElfLibrary {
         path: impl AsRef<str>,
         flags: OpenFlags,
     ) -> Result<Dylib> {
-        dlopen_impl(path.as_ref(), flags, || {
+        dlopen_impl::<FileBuilder, MmapImpl>(path.as_ref(), flags, || {
             ElfLibrary::from_binary(bytes, path.as_ref(), flags)
         })
     }
@@ -57,7 +111,15 @@ impl Drop for Recycler {
     }
 }
 
-fn dlopen_impl(path: &str, flags: OpenFlags, f: impl Fn() -> Result<ElfLibrary>) -> Result<Dylib> {
+fn dlopen_impl<B, M>(
+    path: &str,
+    flags: OpenFlags,
+    f: impl Fn() -> Result<ElfLibrary>,
+) -> Result<Dylib>
+where
+    B: Builder,
+    M: Mmap,
+{
     let shortname = path.split('/').last().unwrap();
     log::info!("dlopen: Try to open [{}] with [{:?}] ", path, flags);
     let mut lock = MANAGER.write();
@@ -100,12 +162,10 @@ fn dlopen_impl(path: &str, flags: OpenFlags, f: impl Fn() -> Result<ElfLibrary>)
     recycler.old_all_len = lock.all.len();
     recycler.old_global_len = lock.global.len();
 
-    #[cfg(feature = "std")]
     let mut cur_newlib_pos = 0;
     // 广度优先搜索，这是规范的要求，这个循环里会加载所有需要的动态库，无论是直接依赖还是间接依赖的
     while cur_pos < dep_libs.len() {
         let lib_names: &[&str] = unsafe { core::mem::transmute(dep_libs[cur_pos].needed_libs()) };
-        #[cfg(feature = "std")]
         let mut cur_rpath = None;
         for lib_name in lib_names {
             if let Some(lib) = lock.all.get_mut(*lib_name) {
@@ -132,47 +192,37 @@ fn dlopen_impl(path: &str, flags: OpenFlags, f: impl Fn() -> Result<ElfLibrary>)
                 continue;
             }
 
-            #[cfg(feature = "std")]
-            {
-                let rpath = if let Some(rpath) = &cur_rpath {
-                    rpath
-                } else {
-                    let parent_lib = new_libs[cur_newlib_pos].as_ref().unwrap();
-                    cur_rpath = Some(
-                        parent_lib
-                            .dylib
-                            .rpath()
-                            .map(|rpath| imp::fixup_rpath(parent_lib.name(), rpath))
-                            .unwrap_or(Box::new([])),
-                    );
-                    cur_newlib_pos += 1;
-                    unsafe { cur_rpath.as_ref().unwrap_unchecked() }
-                };
+            let rpath = if let Some(rpath) = &cur_rpath {
+                rpath
+            } else {
+                let parent_lib = new_libs[cur_newlib_pos].as_ref().unwrap();
+                cur_rpath = Some(
+                    parent_lib
+                        .dylib
+                        .rpath()
+                        .map(|rpath| fixup_rpath(parent_lib.name(), rpath))
+                        .unwrap_or(Box::new([])),
+                );
+                cur_newlib_pos += 1;
+                unsafe { cur_rpath.as_ref().unwrap_unchecked() }
+            };
 
-                imp::find_library(rpath, lib_name, |file, file_path| {
-                    let new_lib =
-                        ElfLibrary::from_open_file(file, file_path.to_str().unwrap(), flags)?;
-                    let inner = new_lib.dylib.core_component().clone();
-                    register(
-                        unsafe { RelocatedDylib::from_core_component(inner.clone()) },
-                        flags,
-                        None,
-                        &mut lock,
-                        *DylibState::default()
-                            .set_used()
-                            .set_new_idx(new_libs.len() as _),
-                    );
-                    dep_libs.push(unsafe { RelocatedDylib::from_core_component(inner) });
-                    new_libs.push(Some(new_lib));
-                    Ok(())
-                })?;
-            }
-
-            #[cfg(not(feature = "std"))]
-            return Err(crate::find_lib_error(alloc::format!(
-                "can not find file: {}",
-                lib_name
-            )));
+            find_library(rpath, lib_name, |path| {
+                let new_lib = ElfLibrary::from_builder::<B, M>(path.as_str(), flags)?;
+                let inner = new_lib.dylib.core_component().clone();
+                register(
+                    unsafe { RelocatedDylib::from_core_component(inner.clone()) },
+                    flags,
+                    None,
+                    &mut lock,
+                    *DylibState::default()
+                        .set_used()
+                        .set_new_idx(new_libs.len() as _),
+                );
+                dep_libs.push(unsafe { RelocatedDylib::from_core_component(inner) });
+                new_libs.push(Some(new_lib));
+                Ok(())
+            })?;
         }
         cur_pos += 1;
     }
@@ -249,102 +299,122 @@ fn dlopen_impl(path: &str, flags: OpenFlags, f: impl Fn() -> Result<ElfLibrary>)
     Ok(res)
 }
 
-#[cfg(feature = "std")]
-pub mod imp {
-    use crate::{Result, find_lib_error};
-    use core::str::FromStr;
-    use dynamic_loader_cache::{Cache as LdCache, Result as LdResult};
-    use spin::Lazy;
-    use std::path::PathBuf;
-
-    static LD_LIBRARY_PATH: Lazy<Box<[PathBuf]>> = Lazy::new(|| {
+static LD_LIBRARY_PATH: Lazy<Box<[ElfPath]>> = Lazy::new(|| {
+    #[cfg(feature = "std")]
+    {
         let library_path = std::env::var("LD_LIBRARY_PATH").unwrap_or(String::new());
         deal_path(&library_path)
-    });
-    static DEFAULT_PATH: spin::Lazy<Box<[PathBuf]>> = Lazy::new(|| unsafe {
-        vec![
-            PathBuf::from_str("/lib").unwrap_unchecked(),
-            PathBuf::from_str("/usr/lib").unwrap_unchecked(),
-        ]
-        .into_boxed_slice()
-    });
-    static LD_CACHE: Lazy<Box<[PathBuf]>> = Lazy::new(|| {
-        build_ld_cache().unwrap_or_else(|err| {
-            log::warn!("Build ld cache failed: {}", err);
-            Box::new([])
-        })
-    });
+    }
+    #[cfg(not(feature = "std"))]
+    Box::new([])
+});
+static DEFAULT_PATH: spin::Lazy<Box<[ElfPath]>> = Lazy::new(|| unsafe {
+    let mut v = Vec::new();
+    v.push(ElfPath::from_str("/lib").unwrap_unchecked());
+    v.push(ElfPath::from_str("/usr/lib").unwrap_unchecked());
+    v.into_boxed_slice()
+});
+static LD_CACHE: Lazy<Box<[ElfPath]>> = Lazy::new(|| build_ld_cache());
+
+#[inline]
+fn fixup_rpath(lib_path: &str, rpath: &str) -> Box<[ElfPath]> {
+    if !rpath.contains('$') {
+        return deal_path(rpath);
+    }
+    for s in rpath.split('$').skip(1) {
+        if !s.starts_with("ORIGIN") && !s.starts_with("{ORIGIN}") {
+            log::warn!("DT_RUNPATH format is incorrect: [{}]", rpath);
+            return Box::new([]);
+        }
+    }
+    let dir = if let Some((path, _)) = lib_path.rsplit_once('/') {
+        path
+    } else {
+        "."
+    };
+    deal_path(&rpath.to_string().replace("$ORIGIN", dir))
+}
+
+#[inline]
+fn deal_path(s: &str) -> Box<[ElfPath]> {
+    s.split(":")
+        .map(|str| ElfPath::from_str(str).unwrap())
+        .collect()
+}
+
+#[inline]
+fn find_library(
+    cur_rpath: &Box<[ElfPath]>,
+    lib_name: &str,
+    mut f: impl FnMut(&ElfPath) -> Result<()>,
+) -> Result<()> {
+    // Search order: DT_RPATH(deprecated) -> LD_LIBRARY_PATH -> DT_RUNPATH -> /etc/ld.so.cache -> /lib:/usr/lib.
+    let search_paths = LD_LIBRARY_PATH
+        .iter()
+        .chain(cur_rpath.iter())
+        .chain(LD_CACHE.iter())
+        .chain(DEFAULT_PATH.iter());
+
+    for path in search_paths {
+        let file_path = path.join(lib_name);
+        log::trace!("Try to open dependency shared object: [{:?}]", file_path);
+        if f(&file_path).is_ok() {
+            return Ok(());
+        }
+    }
+    Err(find_lib_error(format!("can not find file: {}", lib_name)))
+}
+
+#[cfg(feature = "std")]
+mod imp {
+    use super::ElfPath;
+    use dynamic_loader_cache::{Cache as LdCache, Result as LdResult};
 
     #[inline]
-    fn build_ld_cache() -> LdResult<Box<[PathBuf]>> {
+    pub(super) fn build_ld_cache() -> Box<[ElfPath]> {
         use std::collections::HashSet;
-
-        let cache = LdCache::load()?;
-        let unique_ld_foders = cache
-            .iter()?
-            .filter_map(LdResult::ok)
-            .map(|entry| {
-                // Since the `full_path` is always a file, we can always unwrap it
-                entry.full_path.parent().unwrap().to_owned()
+        LdCache::load()
+            .and_then(|cache| {
+                Ok(Vec::from_iter(
+                    cache
+                        .iter()?
+                        .filter_map(LdResult::ok)
+                        .map(|entry| {
+                            // Since the `full_path` is always a file, we can always unwrap it
+                            ElfPath::from_str(
+                                entry
+                                    .full_path
+                                    .parent()
+                                    .unwrap()
+                                    .to_owned()
+                                    .to_str()
+                                    .unwrap(),
+                            )
+                            .unwrap()
+                        })
+                        .collect::<HashSet<_>>(),
+                )
+                .into_boxed_slice())
             })
-            .collect::<HashSet<_>>();
-        Ok(Vec::from_iter(unique_ld_foders).into_boxed_slice())
-    }
-
-    #[inline]
-    pub(crate) fn fixup_rpath(lib_path: &str, rpath: &str) -> Box<[PathBuf]> {
-        if !rpath.contains('$') {
-            return deal_path(rpath);
-        }
-        for s in rpath.split('$').skip(1) {
-            if !s.starts_with("ORIGIN") && !s.starts_with("{ORIGIN}") {
-                log::warn!("DT_RUNPATH format is incorrect: [{}]", rpath);
-                return Box::new([]);
-            }
-        }
-        let dir = if let Some((path, _)) = lib_path.rsplit_once('/') {
-            path
-        } else {
-            "."
-        };
-        deal_path(&rpath.to_string().replace("$ORIGIN", dir))
-    }
-
-    #[inline]
-    fn deal_path(s: &str) -> Box<[PathBuf]> {
-        s.split(":")
-            .map(|str| std::path::PathBuf::try_from(str).unwrap())
-            .collect()
-    }
-
-    #[inline]
-    pub(crate) fn find_library(
-        cur_rpath: &Box<[PathBuf]>,
-        lib_name: &str,
-        mut f: impl FnMut(std::fs::File, &std::path::PathBuf) -> Result<()>,
-    ) -> Result<()> {
-        // Search order: DT_RPATH(deprecated) -> LD_LIBRARY_PATH -> DT_RUNPATH -> /etc/ld.so.cache -> /lib:/usr/lib.
-        let search_paths = LD_LIBRARY_PATH
-            .iter()
-            .chain(cur_rpath.iter())
-            .chain(LD_CACHE.iter())
-            .chain(DEFAULT_PATH.iter());
-
-        for path in search_paths {
-            let file_path = path.join(lib_name);
-            log::trace!("Try to open dependency shared object: [{:?}]", file_path);
-            if let Ok(file) = std::fs::File::open(&file_path) {
-                match f(file, &file_path) {
-                    Ok(_) => return Ok(()),
-                    Err(err) => {
-                        log::debug!("Cannot load dylib: [{:?}] reason: [{:?}]", file_path, err)
-                    }
-                }
-            }
-        }
-        Err(find_lib_error(format!("can not find file: {}", lib_name)))
+            .unwrap_or_else(|err| {
+                log::warn!("Build ld cache failed: {}", err);
+                Box::new([])
+            })
     }
 }
+
+#[cfg(not(feature = "std"))]
+mod imp {
+    use alloc::boxed::Box;
+
+    use super::ElfPath;
+    #[inline]
+    pub(super) fn build_ld_cache() -> Box<[ElfPath]> {
+        Box::new([])
+    }
+}
+
+use imp::build_ld_cache;
 
 #[allow(unused_variables)]
 /// It is the same as `dlopen`.
